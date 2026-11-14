@@ -55,6 +55,9 @@ const SITE_TABS = [
   ] }] },
   { plate: "DOWNLOAD", sections: [
     { head: "Download the game", blocks: [
+      // the apps update themselves since 13 November 2026 (the APK and the Windows zip on R2 since 18:01 and 18:05 UTC); the earlier
+      // builds opened on the game's title and have no updater, and the same app name and page address keep their saves
+      ["note", "Downloaded the app before 13 November 2026? Please download it again: those first versions cannot update themselves. They open straight on the game's title, not on a page with ABOUT, GITHUB, SAVE DATA and PLAY. On Android, install the new one over the old one; on Windows, extract it and play from the new folder. Your saves stay."],
       "The whole game as an app that needs no connection: every picture, voice, song and movie is inside it, and nothing is fetched while you play. Windows and Android have a download here; for macOS and Linux the same app is built from the source, below.",
       ["facts", [[DESKTOP.size, "Windows"], [APK.size, "Android"], ["0", "connections needed"]]],
       "It is this site's game in a window of its own, in English only, opening on this page's ABOUT, GITHUB, SAVE DATA and PLAY. Saves are kept in the app, apart from this site's, and stay when a newer version replaces it; SAVE DATA moves progress between the app and this site as a file. Leaving the app makes the automatic save, so you come back to where you were.",
