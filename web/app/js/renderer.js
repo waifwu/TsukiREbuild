@@ -641,6 +641,7 @@ export class Renderer {
     const memory = globalThis.navigator?.deviceMemory || (appleTouch(globalThis) ? 2 : 8);
     this.limit = (this.maxSide <= 4096 || memory <= 2 ? 400 : memory <= 4 ? 700 : 1400) * 1024 * 1024;
     this.blurCache = new Map();
+    this.blurRefused = new Set();   // blurred copies the GPU would not hold: drawn sharp (blurred)
     this.fade = null;
     this.shake = null;
   }
@@ -655,6 +656,17 @@ export class Renderer {
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     return { tex, fbo, w, h };
+  }
+
+  // A target that may be refused (blurred): null when the GPU turned it down, as an empty texture would draw as black.
+  checkedTarget(w, h) {
+    const gl = this.gl;
+    if (w > this.maxSide || h > this.maxSide || gl.isContextLost()) return null;
+    while (gl.getError() !== gl.NO_ERROR) { /* what went wrong before this is not this target's */ }
+    const t = this.target(w, h);
+    if (gl.getError() === gl.NO_ERROR && gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) return t;
+    this.freeTarget(t);
+    return null;
   }
 
   freeTarget(t) {
@@ -808,13 +820,34 @@ export class Renderer {
       hit.used = performance.now();
       return hit;
     }
+    if (this.blurRefused.has(key)) return e;
     const gl = this.gl;
     const k = e.w / e.nw;                 // texture pixels per stored pixel
     const sx = blurSigma(name, rx) * k, sy = blurSigma(name, ry) * k;
-    const f = Math.max(1, Math.floor(Math.max(sx, sy) / 4));
     const pad = Math.ceil(Math.max(sx, sy) * 3) + 2;
-    const w = Math.max(2, Math.ceil((e.w + 2 * pad) / f)), h = Math.max(2, Math.ceil((e.h + 2 * pad) / f));
-    const a = this.target(w, h), b = this.target(w, h);
+    // The blurred copy is the picture plus a margin for the blur's spread, so a picture at the GPU's limit on a side (a standing sprite
+    // made smaller to 4096 by upload) would need one over it: refused, an empty texture, a black box (Akiha in 01_00_ARC01_7, blur 2: 4110
+    // tall). It is made at a working scale that fits, and one the GPU turns down anyway is made again with the pictures not on screen let go,
+    // then at half that scale. One that still fails leaves the picture sharp, which is better than no picture.
+    let f = Math.max(1, Math.floor(Math.max(sx, sy) / 4), Math.ceil((e.w + 2 * pad) / this.maxSide), Math.ceil((e.h + 2 * pad) / this.maxSide));
+    let w, h, a = null, b = null;
+    for (let tries = 0; ; tries++) {
+      w = Math.max(2, Math.ceil((e.w + 2 * pad) / f));
+      h = Math.max(2, Math.ceil((e.h + 2 * pad) / f));
+      a = this.checkedTarget(w, h);
+      b = a && this.checkedTarget(w, h);
+      if (b) break;
+      if (a) this.freeTarget(a);
+      if (tries >= 2 || gl.isContextLost()) {
+        this.blurRefused.add(key);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.drawFbo || this.scene.fbo);
+        gl.viewport(0, 0, 1920, 1080);
+        return e;
+      }
+      this.limit = Math.max(MIN_TEXTURES, Math.min(this.limit, this.bytes) * 0.75);
+      this.evict(true);
+      if (tries) f *= 2;
+    }
     gl.disable(gl.BLEND);
     // place the image, padded, at the working scale. The vertex shader works in 1920 x 1080: map the target to that.
     gl.bindFramebuffer(gl.FRAMEBUFFER, a.fbo);
