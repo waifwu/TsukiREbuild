@@ -671,16 +671,18 @@ export class UI {
   }
 
   // The hint bar along the bottom: what the keys and the mouse do on this screen, on the game's translucent band (native
-  // 0x4a8f0 drew the controller's buttons there). labels: the screen's entries by name (HINTS above).
+  // 0x4a8f0 drew the controller's buttons there). labels: the screen's entries by name (HINTS above), or [name, keys] for
+  // a screen's own keys under a name another screen has (the flowchart's zoom).
   helpBar(page, labels) {
     const bar = document.createElement("div");
     bar.className = "helpbar";
-    bar.setAttribute("aria-label", labels.join(", "));
-    for (const label of labels) {
+    const entries = labels.map((l) => (Array.isArray(l) ? l : [l, null]));
+    bar.setAttribute("aria-label", entries.map(([label]) => label).join(", "));
+    for (const [label, own] of entries) {
       const hint = document.createElement("span");
       hint.className = "hint";
       // on a touch device, what a finger does instead (touch.js TOUCH_HINTS); an entry with nothing to say is left out
-      const keys = this.touch ? TOUCH_HINTS[label] : label === "Replay voice" ? [this.keys?.label("voice") || "V", ...HINTS[label].slice(1)] : HINTS[label] || [];
+      const keys = this.touch ? TOUCH_HINTS[label] : own ? own : label === "Replay voice" ? [this.keys?.label("voice") || "V", ...HINTS[label].slice(1)] : HINTS[label] || [];
       if (!keys) continue;
       for (const key of keys) hint.append(Object.assign(document.createElement("kbd"), { textContent: key }));
       hint.append(Object.assign(document.createElement("span"), { className: "hint-label", textContent: (JA && HINTS_JA[label]) || label }));

@@ -306,7 +306,8 @@ html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
 .fc-view { position: absolute; overflow: hidden; scrollbar-width: none; cursor: grab; isolation: isolate; touch-action: none; }
 .fc-view::-webkit-scrollbar { display: none; }
 .fc-view.drag { cursor: grabbing; }
-.fc-map { position: relative; overflow: hidden; }
+/* (zoomed, flowchart.js sets a transform from the map's top left; at the game's size it has none) */
+.fc-map { position: relative; overflow: hidden; transform-origin: 0 0; }
 .fc-titles { position: absolute; left: 0; top: 0; pointer-events: none; }
 /* A day's chapters (flowchart.js), after the game's pictures of them (flow_phasetitle: a narrow face, white, set right), written larger. */
 .fc-chapter { position: absolute; box-sizing: border-box; text-align: right; white-space: nowrap; color: #fff; pointer-events: none;

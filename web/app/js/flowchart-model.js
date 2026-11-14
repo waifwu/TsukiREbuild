@@ -605,20 +605,80 @@ export function moveCursor(L, at, key) {
   return null;
 }
 
+// ---- zooming the chart (the port's own: the game's flowchart has one size, 0x11418 reads no zoom) --------------------
+// The view is the chart's window, 1440 x 1022 at the stage's top left; only x 0-1360 of it is open (the preview lies over
+// the rest, and a drag starts there only, 0x6a0). Zoomed by z it shows 1440 / z x 1022 / z of the chart from its scroll
+// (x across, s down, in the chart's pixels). z runs from 1, the game's size, which is the view as it always was, to
+// FLOW_ZOOM.max; the keys step through FLOW_ZOOM.steps, the wheel with Ctrl (a touchpad's pinch) goes smoothly, at most
+// FLOW_ZOOM.wheelStep of the wheel's pixels an event, e ^ -(FLOW_ZOOM.wheel x pixels) times larger.
+export const FLOW_VIEW = { w: 1440, h: 1022, open: 1360, full: 1920, tall: 1080 };
+export const FLOW_ZOOM = { max: 3, steps: [1, 1.25, 1.5, 2, 2.5, 3], wheel: 0.01, wheelStep: 25, snap: 1.005 };
+export const clampZoom = (z) => (!(z >= FLOW_ZOOM.snap) ? 1 : Math.min(FLOW_ZOOM.max, z));
+// On a touch device (tall), where no hint bar is drawn under it (touch.css), the view runs down to the stage's bottom at
+// any zoom (the user, 2026-11-14: "on phones helper bar isnt drawn so push it all the down", "not just zoomed unzoomed
+// too since there's no helper bar its empty space"); with a mouse it ends above the hint bar, at 1022, as ever. The
+// rules made for 1022 (the scroll's end, 0x10d5c's 966, 0x12d1c's 994) keep their distances from the view's bottom.
+export const viewHeight = (z = 1, tall = false) => (tall ? FLOW_VIEW.tall : FLOW_VIEW.h);
+// The scroll's end zoomed: the chart's bottom (the scroll bar's end + 1022 at the game's size) at the view's bottom.
+// At z 1 with a mouse it is the scroll bar's end (not under 0), as ever.
+export const zoomScrollMax = (L, z = 1, tall = false) => Math.max(0, Math.max(0, L.scrollMax) + FLOW_VIEW.h - viewHeight(z, tall) / z);
+// Zoomed, the view takes the stage's whole width (the user, 2026-11-14: "it should expand all the way, not cut off like
+// that on right"): the chart's bands are dark at its left and fade out by x 1380 or so, so at the game's size they end
+// inside the view's 1440; drawn larger they would be cut off at its edge. At z 1 the view is 1440 wide, as ever.
+export const viewWidth = (z = 1) => (z > 1 ? FLOW_VIEW.full : FLOW_VIEW.w);
+// ... and the scroll across goes as far as puts the chart's right edge (1440) where it is at the game's size: the bands
+// have faded out by then, so no edge shows right of it, and the last column (its parts end at 1310) is clear of the
+// preview. From 0 at z 1, so a pinch's point stays under the fingers from the start.
+export const panMax = (z = 1) => Math.max(0, FLOW_VIEW.w - FLOW_VIEW.w / z);
+// The view zoomed to z from v ({ z, x, s }): the chart's point that was at `at` (view pixels) comes to `to` (a pinch's
+// point between the fingers moves; the wheel and the keys keep it), the view kept inside the chart. Back at z 1 the view
+// is the game's again: no pan, a whole scroll. tall: a touch device's (viewHeight).
+export function zoomView(L, v, z, at, to = at, tall = false) {
+  const k = clampZoom(z);
+  const cx = v.x + at[0] / v.z, cy = v.s + at[1] / v.z;
+  const x = Math.max(0, Math.min(panMax(k), cx - to[0] / k)), s = Math.max(0, Math.min(zoomScrollMax(L, k, tall), cy - to[1] / k));
+  return k === 1 ? { z: 1, x: 0, s: Math.round(s) } : { z: k, x, s };
+}
+// The next step in (dir 1) or out (-1) from z; 0: the game's size.
+export function zoomStep(z, dir) {
+  const S = FLOW_ZOOM.steps;
+  if (!dir) return 1;
+  if (dir > 0) return S.find((v) => v > z + 1e-6) ?? FLOW_ZOOM.max;
+  return [...S].reverse().find((v) => v < z - 1e-6) ?? 1;
+}
+// A wheel event's zoom: px, its distance in the wheel's own pixels (uifx.js wheelPixels at scale 1), down to zoom out.
+export const wheelZoom = (z, px) => clampZoom(z * Math.exp(-Math.max(-FLOW_ZOOM.wheelStep, Math.min(FLOW_ZOOM.wheelStep, px)) * FLOW_ZOOM.wheel));
+// Whether the part (r, c) is a selectable node wholly in the open part of the view across, scrolled to x at zoom z.
+const acrossInView = (L, r, c, x, z) => { const p = L.part(r, c); return !!p?.reg && p.x >= x && p.x + 104 <= x + FLOW_VIEW.open / z; };
+// Zoomed, a node the keys select is brought into view across as 0x10d5c brings it down: one left of 8 (from the view's
+// left) comes to 8, one past 8 from the open part's right edge comes to there. null: no move (always at z 1).
+export function panFor(L, at, x, z = 1) {
+  if (!(z > 1)) return null;
+  const p = L.part(at.row, at.col);
+  if (!p) return null;
+  const w = FLOW_VIEW.open / z;
+  let to;
+  if (p.x - x < 8) to = p.x - 8;
+  else if (p.x + 104 - x > w - 8) to = p.x + 104 - w + 8;
+  else return null;
+  return Math.max(0, Math.min(panMax(z), to));
+}
+
 // Where the chart scrolls to show a new selection (0x10d5c): a node above y 2 brings the row above it to y 4, one below
 // y 966 the row below it to 966 (the last row's own); within 2-966 nothing moves. The scroll stays within 0 and the
 // scroll bar's end; a move eases there over 1/6 s, quadratic out (0x27bd4 type 2 mode 1), the opening at once.
+// Zoomed (z, the port's), 966 is as far above the view's bottom as ever (56), in the chart's pixels (tall: viewHeight).
 export const FLOW_SCROLL_TIME = 1 / 6;
-export function scrollFor(L, at, scroll) {
+export function scrollFor(L, at, scroll, z = 1, tall = false) {
   const p = L.part(at.row, at.col);
   if (!p) return null;
-  const y = p.y - scroll, last = L.rows.length - 1;
+  const y = p.y - scroll, last = L.rows.length - 1, bottom = viewHeight(z, tall) / z - 56;
   let to;
   if (y < 2) to = L.part(Math.max(0, at.row - 1), 0)?.y ?? p.y;
-  else if (y > 966) to = L.rows[Math.min(last, at.row + 1)].parts[0].y;
+  else if (y > bottom) to = L.rows[Math.min(last, at.row + 1)].parts[0].y;
   else return null;
-  const value = y < 2 ? to - 4 : to - 966;
-  return Math.max(0, Math.min(Math.max(0, L.scrollMax), value));
+  const value = y < 2 ? to - 4 : to - bottom;
+  return Math.max(0, Math.min(zoomScrollMax(L, z, tall), value));
 }
 // ---- the player's scroll (0x11418) ---------------------------------------------------------------------------------
 // The first stick (input +0x1e, -128 ... 128 up, from the left stick: fcvtzs #7 of the axis in 0xb38f4) scrolls when no
@@ -652,8 +712,11 @@ export class PadRepeat {
 // scroll + 6 x velocity over 1/6 s (0x11418 -> 0x6c4), also after the release: it coasts.
 export class DragFlick {
   constructor() { this.v = 0; this.last = null; }
-  // y: the pointer's y in touch pixels this frame (null: not pressed). Returns the scroll's new target, or null.
-  step(y, scroll) {
+  reset() { this.v = 0; this.last = null; }
+  // y: the pointer's y in touch pixels this frame (null: not pressed). Returns the scroll's new target, or null. z: the
+  // port's zoom, under which the chart moves as far on the screen (by 6 x the velocity / z of its own pixels), not cut
+  // to whole pixels.
+  step(y, scroll, z = 1) {
     if (Math.abs(this.v) > 1.1920929e-7) {
       this.v = Math.fround(this.v * Math.fround(0.9));
       if (Math.abs(this.v) < 0.5) this.v = 0;
@@ -668,15 +731,19 @@ export class DragFlick {
       this.last = y;
     }
     const d = Math.fround(this.v * 6);
-    return Math.abs(d) > 1.1920929e-7 ? Math.trunc(d + scroll) : null;
+    if (!(Math.abs(d) > 1.1920929e-7)) return null;
+    return z === 1 ? Math.trunc(d + scroll) : scroll + d / z;
   }
 }
 
 // After a scroll by the player (stick, wheel, scroll bar: 0x11418 -> 0x12d1c), the selection moves to a node in view:
 // from its row down to the first row whose nearest node (0x1303c mode 0, else 1, the column carried along) is at
 // y 4 or below, then from there up to one above y 994. null: the selection's row is still the one.
-export function reselect(L, at, scroll) {
-  const last = L.rows.length - 1;
+// Zoomed (the port's: z, scrolled to x across), 994 is as far above the view's bottom as ever (28), in the chart's
+// pixels (tall: viewHeight), and the node found must be in view across too: else the nearest one of its row that is, if
+// any; a move across alone then re-selects as well.
+export function reselect(L, at, scroll, z = 1, x = 0, tall = false) {
+  const last = L.rows.length - 1, bottom = viewHeight(z, tall) / z - 28;
   let r = at.row, c = at.col;
   const look = (rr) => { let k = nearestColumn(L, rr, c, 0); if (k < 0) k = nearestColumn(L, rr, c, 1); return k; };
   if (r < last) {
@@ -689,11 +756,19 @@ export function reselect(L, at, scroll) {
   if (r > 0) {
     for (;;) {
       const k = look(r);
-      if (k >= 0) { c = k; if (L.part(r, k).y - scroll < 994) break; }
+      if (k >= 0) { c = k; if (L.part(r, k).y - scroll < bottom) break; }
       if (--r < 1) break;
     }
   }
-  return r === at.row ? null : { row: r, col: c };
+  if (!(z > 1)) return r === at.row ? null : { row: r, col: c };
+  if (!acrossInView(L, r, c, x, z)) {
+    const n = L.rows[r]?.parts.length ?? 0;
+    for (let d = 1; d < n; d++) {
+      const k = [c + d, c - d].find((j) => j >= 0 && j < n && acrossInView(L, r, j, x, z));   // (+1 before -1, as 0x1303c)
+      if (k !== undefined) { c = k; break; }
+    }
+  }
+  return r === at.row && c === at.col ? null : { row: r, col: c };
 }
 
 // A preview title stays on its one row (the 400 x 48 box, 0x16e00). The patch fitted them to the game's 33 fixed-width

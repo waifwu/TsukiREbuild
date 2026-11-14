@@ -3,10 +3,11 @@
 import { sprite } from "./ui.js";
 import { reflowNote } from "./reflow.js";
 import { chapterLine, flowChapter } from "./chapters.js";
-import { DragFlick, FLOW_SCROLL_TIME, PadRepeat, STICK_DEAD, layoutChart, moveCursor, reselect, scrollFor, stickTarget, titleSize } from "./flowchart-model.js";
+import { DragFlick, FLOW_SCROLL_TIME, FLOW_VIEW, PadRepeat, STICK_DEAD, layoutChart, moveCursor, panFor, panMax, reselect, scrollFor, stickTarget, titleSize, viewHeight, viewWidth, wheelZoom, zoomScrollMax, zoomStep, zoomView } from "./flowchart-model.js";
 import { EASE, MenuBgFade, Tween, fadeIn, fadeOut, wheelPixels } from "./uifx.js";
 import { GuideFx, REPLAY_MENU_BG, cgCursorLight, fadeMusicOut, scrollBar } from "./gallery.js";
 import { JA, asset } from "./lang.js";
+import { pinch } from "./touch.js";
 
 const PACK = "MENU_PARTS_JA";
 
@@ -43,6 +44,11 @@ export const PREVIEW_QUICK = 12;
 // while its scroll bar is on, else 10 (no Scroll).
 export const HELP = { 0: ["Back", "Choose", "Move", "Scroll"], 10: ["Back", "Choose", "Move"] };
 export const helpKind = (layout) => (layout.scrollMax > 0 ? 0 : 10);
+// The port's own zoom (flowchart-model.js zoomView), after the kind's entries, under the CG viewer's names for the same
+// two things (ui.helpBar: [label, keys]): the wheel with Ctrl (a touchpad's pinch) or + / -, and 0 for the game's size.
+export const ZOOM_KEYS = { "+": 1, "=": 1, "-": -1, "0": 0 };
+export const ZOOM_HELP = [["Zoom", ["Ctrl + Wheel", "+ −"]], ["Reset", ["0"]]];
+export const helpEntries = (kind) => [...(HELP[kind] || HELP[10]), ...ZOOM_HELP];
 
 // The first stick's value (-128 ... 128, up positive; 0xb38f4: the axis x 128, truncated, the pads summed and clamped)
 // from the browser's pads (standard mapping: axes[1], down positive, is the left stick) and PageUp / PageDown, which the
@@ -96,7 +102,10 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
 
   vm.flow.infer();
   const layout = layoutChart(chart, vm.flow, { game });
-  const view = place(element("div", "fc-view"), 0, 0, 1440, 1022);
+  // (a touch device draws no hint bar, touch.css: there the chart's window runs down to the stage's bottom, the port's own;
+  // with a mouse it ends at 1022 above the bar, as the game's does above its help band: viewHeight)
+  const tall = !!ui.touch;
+  const view = place(element("div", "fc-view"), 0, 0, 1440, viewHeight(1, tall));
   const map = element("div", "fc-map");
   // the scroll runs from 0 to the chart's end as 0xfffc gives it (the scroll bar's range), not to the last pixel drawn
   map.style.width = "1440px"; map.style.height = `${Math.max(0, layout.scrollMax) + 1022}px`;
@@ -138,7 +147,10 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
   // (z 500 / 300: "This scene" is in front of the pictures, z 400 / 350)
   const thisScene = sprite(PACK, "flow_info", 1672, 120, 144, 32);
   thisScene.style.zIndex = "2";
-  panel.append(sprite(PACK, "flow_infobase", ...chart.layout.previewPanel), thisScene);
+  // (zoomed, the chart runs on under the panel: the panel's base then takes the pointer, so a scene hidden under it is
+  // neither lit nor chosen, and passes the wheel on to the chart; setView)
+  const panelBase = sprite(PACK, "flow_infobase", ...chart.layout.previewPanel);
+  panel.append(panelBase, thisScene);
   page.append(panel);
 
   const at = { row: 0, col: 0 };
@@ -192,17 +204,62 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
   // mark the scroll as the player's: while it runs, and once more as it ends, a node in view takes the selection
   // (0x11418 -> 0x12d1c). The scroll bar is the lists' (0x276b0 / 0x2788c).
   const bar = scrollBar(page);
-  let scrollTw = null, player = false;
-  const clampScroll = (v) => Math.max(0, Math.min(Math.max(0, layout.scrollMax), v));
-  function setScroll(v) { view.scrollTop = v; scrolled(); }
+  const flick = new DragFlick(), flickX = new DragFlick(), padRepeat = new PadRepeat();
+  let scrollTw = null, panTw = null, player = false;
+  // The zoom (the port's own, flowchart-model.js zoomView). At z 1, the game's size, the view scrolls by its scrollTop as it
+  // always did and nothing else is set. Zoomed, the view takes the stage's whole width (viewWidth) and stays at 0, and the
+  // map is drawn larger by a transform from its scroll (zoomTop down, panX across, the chart's pixels): the browser paints
+  // its text and art at that size, sharp, not a picture of the chart enlarged, and into the view's own 1920 x 1022 at
+  // most (1080 on a touch device, which draws no hint bar under it: tall, viewHeight), so nothing grows in memory with it.
+  // Only the keys' moves, the player's scroll and the zoom move it across.
+  let zoom = 1, panX = 0, zoomTop = 0;
+  const top = () => (zoom === 1 ? view.scrollTop : zoomTop);
+  const clampScroll = (v) => Math.max(0, Math.min(zoomScrollMax(layout, zoom, tall), v));
+  const clampPan = (v) => Math.max(0, Math.min(panMax(zoom), v));
+  function setView(s, x = panX, z = zoom) {
+    if (z === 1) {
+      if (zoom !== 1) { map.style.transform = ""; view.style.width = `${FLOW_VIEW.w}px`; panelBase.style.pointerEvents = ""; flickX.reset(); }
+      zoom = 1; panX = 0;
+      view.scrollTop = s;
+    } else {
+      if (zoom === 1) { view.style.width = `${viewWidth(z)}px`; panelBase.style.pointerEvents = "auto"; }
+      zoom = z; panX = x; zoomTop = s;
+      view.scrollTop = 0; view.scrollLeft = 0;
+      map.style.transform = `translate(${-x * z}px, ${-s * z}px) scale(${z})`;
+    }
+    scrolled();
+  }
+  function setScroll(v) { setView(v); }
   function scrolled() {
-    const s = view.scrollTop;
-    bar.set(s, layout.scrollMax);
+    const s = top();
+    bar.set(s, zoom === 1 && !tall ? layout.scrollMax : zoomScrollMax(layout, zoom, tall));
     for (const d of titleDays) d.group.style.transform = `translateY(${stickyShift(d.ys, d.limit, s) }px)`;
   }
   function playerScroll(to) {
-    scrollTw = new Tween(view.scrollTop, clampScroll(to), FLOW_SCROLL_TIME, EASE.quad.out);
+    scrollTw = new Tween(top(), clampScroll(to), FLOW_SCROLL_TIME, EASE.quad.out);
     player = true;
+  }
+  function playerPan(to) {
+    panTw = new Tween(panX, clampPan(to), FLOW_SCROLL_TIME, EASE.quad.out);
+    player = true;
+  }
+  // A zoom to z: the chart's point at `at` (view pixels) comes to `to`, from the view as it is or as it was (a pinch's
+  // start). It stops the scrolls under way. False when nothing changed.
+  function zoomTo(z, at, to = at, from = { z: zoom, x: panX, s: top() }) {
+    const v = zoomView(layout, from, z, at, to, tall);
+    if (v.z === zoom && v.x === panX && v.s === top()) return false;
+    scrollTw = panTw = null; player = false;
+    setView(v.s, v.x, v.z);
+    return true;
+  }
+  // The keys zoom about the selection while it is in the open part of the view, else about that part's middle.
+  function keyAnchor() {
+    const p = layout.part(at.row, at.col);
+    if (p) {
+      const x = (p.x + 52 - panX) * zoom, y = (p.y + 32 - top()) * zoom;
+      if (x >= 0 && x <= FLOW_VIEW.open && y >= 0 && y <= viewHeight(zoom, tall)) return [x, y];
+    }
+    return [FLOW_VIEW.open / 2, viewHeight(zoom, tall) / 2];
   }
 
   // A selection (0x10ba4): the cursor to the node; when the preview differs, the preview changes and the flash starts;
@@ -216,8 +273,10 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
       if (how !== "open") { flashAt = 0; flash.style.opacity = String(cgCursorLight(0)); }
     }
     if (how === "key") {
-      const to = scrollFor(layout, at, view.scrollTop);
-      if (to !== null) scrollTw = new Tween(view.scrollTop, to, FLOW_SCROLL_TIME, EASE.quad.out);
+      const to = scrollFor(layout, at, top(), zoom, tall);
+      if (to !== null) scrollTw = new Tween(top(), to, FLOW_SCROLL_TIME, EASE.quad.out);
+      const x = panFor(layout, at, panX, zoom);   // (zoomed only)
+      if (x !== null) panTw = new Tween(panX, x, FLOW_SCROLL_TIME, EASE.quad.out);
     }
   }
   let how = "pointer";
@@ -233,7 +292,7 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
   // No to the jump: the flowchart again as it was (the native keeps drawing it under the dialog, 0x11a58), without the
   // gallery's page to fade out over it or its own fade in (opts.ghost, opts.reopened).
   function reopen() {
-    return openFlowchart(ui, vm, jump, { flag: layout.part(at.row, at.col)?.flag, top: view.scrollTop }, { ...opts, ghost: null, reopened: true });
+    return openFlowchart(ui, vm, jump, { flag: layout.part(at.row, at.col)?.flag, top: top(), zoom, x: panX }, { ...opts, ghost: null, reopened: true });
   }
 
   // Decide (0x11418) acts on the part at the selection, a node or not: from the gallery the scene plays at once (0x5040
@@ -273,7 +332,8 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
 
   // Keys: Decide on a selection that is no node acts on its part (decide); PageUp / PageDown are the first stick pushed
   // all the way while held (the PC build's SUP / SDOWN), which scrolls; Home / End (the port's) go to the first / last
-  // selectable node.
+  // selectable node; + / - zoom a step in / out and 0 goes back to the game's size (the port's, about keyAnchor; with
+  // Ctrl or Cmd they are left to the browser).
   const held = new Set();
   const win = globalThis;
   const unhold = (e) => {
@@ -284,6 +344,11 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
   ui.keyFn = (e) => {
     if (e.key === "PageUp" || e.key === "PageDown") { if (ready()) held.add(e.key); return true; }
     if (!ready()) return ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", " "].includes(e.key);
+    if (Object.hasOwn(ZOOM_KEYS, e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const dir = ZOOM_KEYS[e.key];
+      if (zoomTo(zoomStep(zoom, dir), keyAnchor()) && dir === 0) ui.sound(0);
+      return true;
+    }
     if ((e.key === "Enter" || e.key === " ") && !index.has(`${at.row}:${at.col}`)) {
       if (!e.repeat) { ui.sound(1); decide(layout.part(at.row, at.col)); }
       return true;
@@ -298,44 +363,117 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
 
   // The pointer: a press in the chart (x 0-1360, y 0-1022) drags it as the touch screen does (DragFlick, in the touch
   // screen's 720-line pixels); a move past 6 pixels makes it a drag, not a click. The wheel (no native one: the PC build
-  // gives it buttons) eases the chart by its own distance over 1/6 s as the other scrolls do.
+  // gives it buttons) eases the chart by its own distance over 1/6 s as the other scrolls do. Zoomed (the port's), a drag
+  // and the wheel move it as far on the screen, across too (Shift turns a wheel sideways); the wheel with Ctrl or Cmd,
+  // which is also what a touchpad's pinch sends, zooms about the pointer, and so does Safari's own pinch (gesture events).
   const stage = () => document.getElementById("stage").getBoundingClientRect();
   const scale = () => stage().width / 1920;
   const touchY = (clientY) => Math.floor(((clientY - stage().top) / scale()) * 720 / 1080);
-  const flick = new DragFlick(), padRepeat = new PadRepeat();
+  const touchX = (clientX) => Math.floor(((clientX - stage().left) / scale()) * 720 / 1080);
+  // a point of the window in the view's pixels (the view lies at the stage's top left), kept inside the view
+  const inView = (cx, cy) => {
+    const s = stage(), k = scale();
+    return [Math.max(0, Math.min(viewWidth(zoom), (cx - s.left) / k)), Math.max(0, Math.min(viewHeight(zoom, tall), (cy - s.top) / k))];
+  };
+  // Fingers on the chart (a touch screen): two pinch it, zooming about the point between them and moving with it
+  // (touch.js pinch). The second finger is the pinch's alone: it lights no scene (ui.add's press) and starts no drag; the
+  // pinch ends when a finger lifts, and the press as a whole selects and opens nothing.
+  const fingers = new Map();
+  let pinched = null, firstSel = null;
+  const fingerDown = (e) => {
+    if (e.pointerType !== "touch") return;
+    // (a new touch: a finger whose lift never came holds nothing up; the selection as it was, which the first finger's
+    // press may light another scene over, ui.add)
+    if (e.isPrimary) { fingers.clear(); pinched = null; firstSel = { i: ui.sel, row: at.row, col: at.col }; }
+    fingers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (fingers.size < 2) return;
+    e.stopPropagation();
+    if (fingers.size !== 2 || pinched || !ready()) return;
+    const [a, b] = [...fingers.values()];
+    pinched = { a, b, z: zoom, x: panX, s: top(), at: inView((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), on: true };
+    press = null; dragged = true; view.classList.remove("drag");
+    flick.reset(); flickX.reset(); scrollTw = panTw = null; player = false;
+    // a pinch is no press on a scene: the one the first finger lit gives the selection back
+    const f = firstSel;
+    if (f && (f.row !== at.row || f.col !== at.col) && index.get(`${f.row}:${f.col}`) === f.i) ui.select(f.i);
+  };
+  view.addEventListener("pointerdown", fingerDown, true);
+  // (zoomed, the view is the stage's width and a drag starts anywhere in it; at the game's size in x 0-1360, 0x6a0)
   view.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || (e.pointerType === "touch" && fingers.size > 1)) return;
     const s = stage(), k = scale(), x = (e.clientX - s.left) / k, y = (e.clientY - s.top) / k;
     dragged = false;
-    if (x < 0 || x > 1360 || y < 0 || y > 1022) return;
-    press = { x: e.clientX, y: e.clientY, cur: e.clientY, id: e.pointerId };
+    if (x < 0 || x > (zoom === 1 ? 1360 : FLOW_VIEW.full) || y < 0 || y > viewHeight(zoom, tall)) return;
+    press = { x: e.clientX, y: e.clientY, cur: e.clientY, curX: e.clientX, id: e.pointerId };
   });
-  view.addEventListener("pointermove", (e) => {
+  const pointerMove = (e) => {
+    if (fingers.has(e.pointerId)) fingers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pinched) {
+      if (pinched.on && fingers.size === 2 && ready()) {
+        const [a, b] = [...fingers.values()], p = pinch(pinched.a, pinched.b, a, b);
+        zoomTo(pinched.z * p.ratio, pinched.at, inView(p.at[0], p.at[1]), pinched);
+      }
+      return;
+    }
     if (!press) return;
-    press.cur = e.clientY;
+    press.cur = e.clientY; press.curX = e.clientX;
     const dx = (e.clientX - press.x) / scale(), dy = (e.clientY - press.y) / scale();
     if (!dragged && Math.hypot(dx, dy) > 6) { dragged = true; view.setPointerCapture?.(press.id); view.classList.add("drag"); }
-  });
-  const release = () => { press = null; view.classList.remove("drag"); setTimeout(() => { dragged = false; }); };
+  };
+  view.addEventListener("pointermove", pointerMove);
+  const release = (e) => {
+    if (fingers.delete(e?.pointerId) && pinched) { pinched.on = false; if (fingers.size) return; pinched = null; }
+    press = null; view.classList.remove("drag"); setTimeout(() => { dragged = false; });
+  };
   view.addEventListener("pointerup", release); view.addEventListener("pointercancel", release);
-  view.addEventListener("wheel", (e) => {
+  let gesture = null;
+  function wheel(e) {
     e.preventDefault(); e.stopPropagation();
-    if (!ready() || layout.scrollMax <= 0) return;
-    const from = scrollTw && player ? scrollTw.to : view.scrollTop;
-    playerScroll(Math.trunc(from + wheelPixels(e, scale())));
-  }, { passive: false });
+    if (!ready()) return;
+    if (e.ctrlKey || e.metaKey) { if (!gesture) zoomTo(wheelZoom(zoom, wheelPixels(e)), inView(e.clientX, e.clientY)); return; }
+    if (zoom === 1) {
+      if (zoomScrollMax(layout, 1, tall) <= 0) return;
+      const from = scrollTw && player ? scrollTw.to : view.scrollTop;
+      playerScroll(Math.trunc(from + wheelPixels(e, scale())));
+      return;
+    }
+    let dx = e.deltaX || 0, dy = e.deltaY || 0;
+    if (e.shiftKey && !dx) { dx = dy; dy = 0; }
+    if (dy) playerScroll((scrollTw && player ? scrollTw.to : top()) + wheelPixels({ deltaY: dy, deltaMode: e.deltaMode }, scale()) / zoom);
+    if (dx) playerPan((panTw && player ? panTw.to : panX) + wheelPixels({ deltaY: dx, deltaMode: e.deltaMode }, scale()) / zoom);
+  }
+  view.addEventListener("wheel", wheel, { passive: false });
+  // The panel's base takes the pointer only while zoomed (setView): fingers on it still pinch, and the wheel and a drag
+  // that passes over it still move the chart.
+  panelBase.addEventListener("pointerdown", fingerDown);
+  panelBase.addEventListener("pointermove", pointerMove);
+  panelBase.addEventListener("pointerup", release); panelBase.addEventListener("pointercancel", release);
+  panelBase.addEventListener("wheel", wheel, { passive: false });
+  // (Safari on a Mac: a touchpad's pinch comes as gesture events, not as the wheel; a touch device's fingers are the pinch above)
+  if (!ui.touch && globalThis.GestureEvent) for (const el of [view, panelBase]) {
+    el.addEventListener("gesturestart", (e) => { e.preventDefault(); gesture = ready() ? { z: zoom, x: panX, s: top(), at: inView(e.clientX, e.clientY) } : null; });
+    el.addEventListener("gesturechange", (e) => { e.preventDefault(); if (gesture && ready()) zoomTo(gesture.z * e.scale, gesture.at, gesture.at, gesture); });
+    el.addEventListener("gestureend", (e) => { e.preventDefault(); gesture = null; });
+  }
   // The player's scroll, each frame as 0x11418 runs it: the first stick (pads, PageUp / PageDown) on its pulses, else
   // the drag's flick; then, while that scroll is on, the re-selection (0x12d1c) as long as the scroll bar is on.
+  // Zoomed (the port's), the stick's and the flick's distances are the screen's, the flick moves across too, and the
+  // re-selection goes on wherever the view can move.
   function playerInput(dt) {
     if (!ready()) return;
     const y = stickY(globalThis.navigator?.getGamepads?.() || [], held);
-    if (padRepeat.step(Math.abs(y) > STICK_DEAD, dt)) { const to = stickTarget(Math.round(view.scrollTop), y); if (to !== null) playerScroll(to); }
-    const to = flick.step(press ? touchY(press.cur) : null, Math.round(view.scrollTop));
+    if (padRepeat.step(Math.abs(y) > STICK_DEAD, dt)) {
+      const d = zoom === 1 ? null : stickTarget(0, y);
+      const to = zoom === 1 ? stickTarget(Math.round(view.scrollTop), y) : d === null ? null : top() + d / zoom;
+      if (to !== null) playerScroll(to);
+    }
+    const to = flick.step(press ? touchY(press.cur) : null, zoom === 1 ? Math.round(view.scrollTop) : top(), zoom);
     if (to !== null) playerScroll(to);
+    if (zoom !== 1) { const x = flickX.step(press ? touchX(press.curX) : null, panX, zoom); if (x !== null) playerPan(x); }
     if (!player) return;
-    if (layout.scrollMax <= 0) { player = false; return; }
-    if (!scrollTw || scrollTw.done) player = false;
-    const r = reselect(layout, at, view.scrollTop);
+    if (zoom === 1 && zoomScrollMax(layout, 1, tall) <= 0) { player = false; return; }
+    if ((!scrollTw || scrollTw.done) && (!panTw || panTw.done)) player = false;
+    const r = reselect(layout, at, top(), zoom, panX, tall);
     const i = r ? index.get(`${r.row}:${r.col}`) : undefined;
     if (i !== undefined) { how = "scroll"; ui.move(i); how = "pointer"; }
   }
@@ -346,7 +484,7 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
   const backToGame = () => { if (opts.back) opts.back(); else if (fromTitle) ui.title(); else ui.system({ flowBack: true }); };
   const kind = helpKind(layout);
   const help = element("div", "fc-help gl-guide");
-  ui.helpBar(help, HELP[kind], kind);
+  ui.helpBar(help, helpEntries(kind), kind);
   page.append(help);
   let guide = null;
   if (opts.gallery) {
@@ -357,7 +495,7 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
   }
   let helpShown = null;
   function drawHelp(alpha) {
-    if (guide && guide.kind !== helpShown) { helpShown = guide.kind; help.textContent = ""; ui.helpBar(help, HELP[guide.kind] || HELP[10], guide.kind); }
+    if (guide && guide.kind !== helpShown) { helpShown = guide.kind; help.textContent = ""; ui.helpBar(help, helpEntries(guide.kind), guide.kind); }
     help.style.opacity = String(alpha);
     help.style.transform = guide ? `translateY(${guide.offset}px)` : "";
   }
@@ -391,7 +529,12 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
       if (i !== undefined && !keep) { how = "key"; ui.select(i); how = "pointer"; }
     }
     playerInput(dt);
-    if (scrollTw) { setScroll(scrollTw.step(dt)); if (scrollTw.done) scrollTw = null; }
+    if (scrollTw || panTw) {
+      const s = scrollTw ? scrollTw.step(dt) : top(), x = panTw ? panTw.step(dt) : panX;
+      if (scrollTw?.done) scrollTw = null;
+      if (panTw?.done) panTw = null;
+      setView(s, x);
+    }
     if (flashAt < 30) { flashAt += dt; flash.style.opacity = String(cgCursorLight(flashAt)); }
     sinceChange += dt;
     fades = fades.filter((f) => {
@@ -438,10 +581,10 @@ export async function openFlowchart(ui, vm, jump, keep = null, opts = {}) {
   const i = index.get(`${at.row}:${at.col}`);
   if (i !== undefined) { how = "open"; ui.select(i); how = "pointer"; }
   else preview(first);
-  if (keep) setScroll(keep.top);
+  if (keep) setView(keep.top, keep.x ?? 0, keep.zoom ?? 1);   // (No to the rewind: as it was, zoom and all)
   else if (start) {
     // (0x10d5c(0) reads the cursor's place: on a part that cannot be selected it is still at 0, so the row above comes to 4)
-    const to = i !== undefined ? scrollFor(layout, at, 0) : Math.max(0, Math.min(Math.max(0, layout.scrollMax), layout.part(Math.max(0, at.row - 1), 0).y - 4));
+    const to = i !== undefined ? scrollFor(layout, at, 0, 1, tall) : Math.max(0, Math.min(zoomScrollMax(layout, 1, tall), layout.part(Math.max(0, at.row - 1), 0).y - 4));
     if (to !== null) setScroll(to);
   } else setScroll(0);
   if (shown) shown.title.style.opacity = shown.note.style.opacity = "1";

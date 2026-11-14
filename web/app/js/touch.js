@@ -82,7 +82,7 @@ export const TOUCH_CONTROLS = [
   ["Scroll a list", "Drag"],
   ["A choice", "Tap it to light it, tap again to take it"],
   ["CG viewer", "Tap or swipe: picture, pinch: zoom, drag: move"],
-  ["Flowchart", "Tap a scene to see it, tap again to open it"],
+  ["Flowchart", "Tap a scene to see it, tap again to open it, pinch: zoom"],
 ];
 
 // Whether this device is played by touch: /?touch=1 or /?touch=0 decides it outright (for testing, and for a device the
