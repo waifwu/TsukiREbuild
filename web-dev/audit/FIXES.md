@@ -1527,3 +1527,51 @@ and the same list of the game's files as the apps were built with, so after a pu
 **Not done, and why.** The Windows and Linux apps were not run. The release APK's update was not tried against the live site, which has no
 `update/app.json` until this is pushed; until then the apps say "Could not look for an update just now." The update's first live run will be
 the push after that one.
+
+**Published, 2026-11-13** (at the user's word, "yea do all 3"). Commit `bd716b3e` pushed to main and deployed: the site serves `v/e8f30a231687/`
+and `update/app.json`. The hosted APK and Windows zip were replaced (the old object deleted first, the new one uploaded in 64 MB parts, size and
+multipart checksum compared with the local file): `android/tsukihime.apk` 2,801,384,376 bytes, `desktop/Tsukihime-win-x64.zip` 2,885,645,007.
+The release app on the phone then said "Up to date." against the live site, which is the update check's first live run; an update's first live
+download will be the next push that changes `web/app`.
+
+## iPhone: the page ended and reloaded in Save, Load and the flowchart (GitHub issue 8), 2026-11-14
+
+**The report.** An iPhone 13 Pro Max on iOS 18.7.8, in Safari, Chrome and Firefox (all three are WebKit there): opening Save, Load or the
+flowchart makes the page crash and reload to the opening page; sometimes it freezes or crashes after a choice; a glow on the choice screen
+seems to last long.
+
+**Two causes, both the port's use of memory**, measured in Safari on the iOS 18.5 simulator (iPhone 16 Pro Max; it has no memory ceiling,
+so nothing crashes there and the figures are the evidence):
+
+1. *The picture budget.* `renderer.js` sized it from `navigator.deviceMemory`, which Safari does not have, and from the texture limit, which
+   is a desktop's there: an iPhone was counted as an 8 GB desktop and kept up to 1,400 MB of pictures. An iPhone or an iPad
+   (`touch.js appleTouch`) now counts as a device with little memory: 400 MB.
+2. *The page's layers.* The stage is laid out 1920 x 1080 and shown through `transform: scale(k)`, k about 0.31 on a phone. WebKit draws a
+   layer at its laid-out size times the screen's density whatever scale it is shown at, so each was drawn in nine times the pixels it was
+   shown in. On an iPhone or an iPad the touch layer now sets the viewport's scale to 1 / devicePixelRatio (`touch.js fitPage`): the page is
+   laid out one CSS pixel to a screen pixel, the stage's own scale comes to about 1, and nothing inside the stage changes. What is measured
+   in the window follows through `touch.unit` (the CSS pixels in one of the screen's points): the story's swipe and tap distances, and the
+   safe area's insets, which the browser goes on giving in points (`touch.css --unit`).
+
+Drawing surfaces held by the browser's GPU process, same steps on a fresh page each time:
+
+| Screen | Before | After |
+|---|---|---|
+| Story | 185 MB | 127 MB |
+| Control panel | 227 MB | 147 MB |
+| Save | 580 MB | 204 MB |
+| Load (no saves) | not measured (the menu page under it: 370 to 480 MB) | 188 MB |
+| Flowchart (five scenes) | not measured | 208 MB |
+| A choice waiting | 396 MB | 157 MB |
+
+**Checked in the simulator after the change:** the layout of the story, the control panel, Save, Load, the flowchart, a choice and the opening
+page (landscape and upright) is as it was; the rotate screen comes and goes; a real swipe down brings the panel; rows and choices take their
+two taps; the insets read 186 px at the sides and 63 px under (62 and 21 points); text is as sharp as before at the screen's own pixels, and
+stays sharp where the stage is shown larger than it is laid out. Any other device: `unit` is 1, the viewport and the budget are untouched
+(desktop Chrome, and Chrome with `?touch=1`). Tests: `touch.test.mjs` (three new), 587 of 589 pass, 2 skipped as before.
+
+**Not done, and why.** Nothing was tried on a real iPhone, and the level at which iOS ends a page on that phone is not known, so "it no
+longer crashes" is not shown, only that the page takes far less. Taking a choice showed no rise in surface memory before or after, so the long
+glow in the report is not explained (the streak pulsing on the lit row is the game's own). An iPad used with a mouse is not touch-first and
+keeps the old layout (it gets the smaller picture budget). Android was left as it was: Chrome is thought to draw a layer at the size it is
+shown, which was not measured.

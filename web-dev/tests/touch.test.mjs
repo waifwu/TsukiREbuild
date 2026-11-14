@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const { TOUCH, TOUCH_HINTS, TOUCH_CONTROLS, FrameGate, StoryTouch, backX, barPlace, installTouch, pinch, stageFit, touchFirst } = await import("../../web/app/js/touch.js");
+const { TOUCH, TOUCH_HINTS, TOUCH_CONTROLS, FrameGate, StoryTouch, appleTouch, backX, barPlace, fitPage, installTouch, pinch, stageFit, touchFirst } = await import("../../web/app/js/touch.js");
 const { UI, HINTS, QUICK_BAR } = await import("../../web/app/js/ui.js");
 const { KeyMap } = await import("../../web/app/js/keys.js");
 const source = (name) => readFileSync(new URL(`../../web/app/${name}`, import.meta.url), "utf8");
@@ -98,6 +98,48 @@ test("the stage is fitted inside the safe area and centred in the window where t
 });
 
 // ---- the story's gestures --------------------------------------------------------------------------------------------
+// ---- an iPhone or an iPad: the page laid out in the screen's pixels (issue 8) ---------------------------------------------
+const IPHONE = { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1", vendor: "Apple Computer, Inc.", maxTouchPoints: 5 };
+const IPAD = { userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Safari/605.1.15", vendor: "Apple Computer, Inc.", maxTouchPoints: 5 };
+const MAC = { ...IPAD, maxTouchPoints: 0 };
+const ANDROID = { userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36", vendor: "Google Inc.", maxTouchPoints: 5, deviceMemory: 8 };
+const VIEWPORT = "width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover";
+const viewportMeta = () => ({ content: VIEWPORT, setAttribute(k, v) { this[k] = v; } });
+
+test("an iPhone or an iPad is known in any of its browsers, an iPad also where it calls itself a Mac; a Mac and an Android phone are not", () => {
+  assert.equal(appleTouch({ navigator: IPHONE }), true);
+  assert.equal(appleTouch({ navigator: { ...IPHONE, userAgent: IPHONE.userAgent.replace("Version/18.5", "CriOS/155.0.8059.37") } }), true, "Chrome there is the same engine");
+  assert.equal(appleTouch({ navigator: IPAD }), true);
+  assert.equal(appleTouch({ navigator: MAC }), false);
+  assert.equal(appleTouch({ navigator: ANDROID }), false);
+  assert.equal(appleTouch({}), false, "no browser at all");
+});
+
+test("on an iPhone the page is laid out one CSS pixel to a screen pixel, so a layer is drawn at the size it is shown; elsewhere the page is left alone", () => {
+  let meta = viewportMeta();
+  const doc = (m) => ({ querySelector: (sel) => (sel === 'meta[name="viewport"]' ? m : null) });
+  assert.equal(fitPage({ navigator: IPHONE, devicePixelRatio: 3 }, doc(meta)), 3);
+  const s = String(1 / 3);
+  assert.equal(meta.content, `width=device-width,initial-scale=${s},minimum-scale=${s},maximum-scale=${s},user-scalable=no,viewport-fit=cover`);
+  meta = viewportMeta();
+  assert.equal(fitPage({ navigator: IPAD, devicePixelRatio: 2 }, doc(meta)), 2);
+  assert.match(meta.content, /initial-scale=0\.5,minimum-scale=0\.5,maximum-scale=0\.5,/);
+  for (const win of [{ navigator: ANDROID, devicePixelRatio: 3 }, { navigator: MAC, devicePixelRatio: 2 }, { navigator: IPHONE, devicePixelRatio: 1 }, { devicePixelRatio: 3 }]) {
+    meta = viewportMeta();
+    assert.equal(fitPage(win, doc(meta)), 1);
+    assert.equal(meta.content, VIEWPORT);
+  }
+  assert.equal(fitPage({ navigator: IPHONE, devicePixelRatio: 3 }, doc(null)), 1, "no viewport to set: nothing is scaled");
+  assert.equal(fitPage({ navigator: IPHONE, devicePixelRatio: 3 }, {}), 1);
+  // the safe area's insets, which the browser gives in points whatever the page's scale, are read in the page's pixels
+  const css = source("touch.css");
+  for (const side of ["top", "right", "bottom", "left"]) assert.ok(css.includes(`calc(env(safe-area-inset-${side}, 0px) * var(--unit, 1))`), side);
+  // ... and it counts as a device with little memory: it does not say how much it has, and a page that takes much is ended there
+  const renderer = source("js/renderer.js");
+  assert.match(renderer, /const memory = globalThis\.navigator\?\.deviceMemory \|\| \(appleTouch\(globalThis\) \? 2 : 8\);/);
+  assert.match(renderer, /this\.limit = \(this\.maxSide <= 4096 \|\| memory <= 2 \? 400 : memory <= 4 \? 700 : 1400\) \* 1024 \* 1024;/);
+});
+
 test("a touch on the story is read as a tap, a swipe, a hold or two fingers", () => {
   const T = TOUCH, g = new StoryTouch();
   // a tap, wandering less than the slop
@@ -190,7 +232,7 @@ test("the frame gate keeps frames asked for while held and asks for them again a
 
 // ---- a touch device, end to end with a small window -------------------------------------------------------------------
 // A window and a document with what installTouch touches: listeners by type, timers and frames stepped by hand.
-function rig({ w = 844, h = 390, search = "", learnt = false } = {}) {
+function rig({ w = 844, h = 390, search = "", learnt = false, iphone = 0 } = {}) {
   class El {
     constructor(tag = "div") { this.tagName = tag.toUpperCase(); this.children = []; this.parent = null; this.style = {}; this.listeners = {}; this.cls = new Set(); this.attrs = {}; this.id = ""; }
     get classList() { const s = this.cls; return { add: (c) => s.add(c), remove: (c) => s.delete(c), toggle: (c, on = !s.has(c)) => { if (on) s.add(c); else s.delete(c); return on; }, contains: (c) => s.has(c) }; }
@@ -207,6 +249,8 @@ function rig({ w = 844, h = 390, search = "", learnt = false } = {}) {
   }
   const stage = new El(), html = new El("html"), body = new El("body"), listeners = {}, docListeners = {};
   stage.id = "stage";
+  html.style.setProperty = function (k, v) { this[k] = v; };
+  const meta = viewportMeta();
   let clock = 0, timers = [], frames = [], dialogStory = false, systemDialog = false, viewer = false;
   const video = Object.assign(new El("video"), { paused: false, pause() { this.paused = true; }, play() { this.paused = false; return Promise.resolve(); } });
   video.setAttribute("src", "/assets/movie/x.mp4");
@@ -220,11 +264,12 @@ function rig({ w = 844, h = 390, search = "", learnt = false } = {}) {
     requestAnimationFrame(f) { frames.push(f); return frames.length; },
     cancelAnimationFrame() {},
   };
+  if (iphone) Object.assign(win, { navigator: IPHONE, devicePixelRatio: iphone });   // (w and h are then in its screen's pixels)
   if (learnt) win.localStorage.setItem(TOUCH.hint.key, "1");
   const doc = {
     documentElement: html, body, hidden: false, fullscreenElement: null,
     createElement: (t) => new El(t), getElementById: (id) => (id === "stage" ? stage : null),
-    querySelector: (sel) => (sel === ".gl-viewer" ? (viewer ? {} : null) : sel.includes(".dialog.story") ? (dialogStory ? {} : null) : sel.includes(".dialog:not(.notice)") ? (systemDialog ? {} : null) : null),
+    querySelector: (sel) => (sel === 'meta[name="viewport"]' ? meta : sel === ".gl-viewer" ? (viewer ? {} : null) : sel.includes(".dialog.story") ? (dialogStory ? {} : null) : sel.includes(".dialog:not(.notice)") ? (systemDialog ? {} : null) : null),
     querySelectorAll: (sel) => (sel === "video" ? [video] : []),
     addEventListener(t, f) { (docListeners[t] ||= []).push(f); },
   };
@@ -245,7 +290,7 @@ function rig({ w = 844, h = 390, search = "", learnt = false } = {}) {
     return ev;
   };
   return {
-    win, doc, stage, html, body, ui, vm, audio, act, calls, video, fire, El,
+    win, doc, stage, html, body, meta, ui, vm, audio, act, calls, video, fire, El,
     set choosing(v) { choosing = v; }, set movie(v) { movie = v; }, set dialogStory(v) { dialogStory = v; }, set systemDialog(v) { systemDialog = v; }, set viewer(v) { viewer = v; },
     advance(ms) { clock += ms; for (const t of timers) if (t.f && t.at <= clock) { const f = t.f; t.f = null; f(); } },
     frame(n = 1) { for (let k = 0; k < n; k++) { clock += 1000 / 60; const fs = frames; frames = []; for (const f of fs) f(clock); } },
@@ -307,6 +352,29 @@ test("on the story a swipe down brings the control panel, a swipe up the log (or
   r.ui.screen = "system"; swipeBy(r, 0, TOUCH.swipe + 5); r.ui.screen = null;
   r.movie = true; swipeBy(r, 0, TOUCH.swipe + 5); r.movie = false;
   assert.deepEqual(r.calls.filter((c) => c !== "start"), []);
+});
+
+test("on an iPhone a finger travels as far on the glass as anywhere: a swipe is three times the pixels, and the page says so to its style sheet", () => {
+  const r = rig({ w: 2532, h: 1170, iphone: 3 });
+  const touch = installTouch({ win: r.win, doc: r.doc });
+  assert.equal(touch.unit, 3);
+  assert.equal(r.html.style["--unit"], "3");
+  assert.match(r.meta.content, /initial-scale=0\.3333333333333333,/);
+  touch.bind({ ui: r.ui, vm: r.vm, audio: r.audio, act: r.act });
+  r.calls.length = 0;
+  swipeBy(r, 0, TOUCH.swipe * 2);   // (two thirds of a swipe's length on the glass)
+  assert.deepEqual(r.calls.filter((c) => c !== "start"), [], "not yet a swipe, and no longer a tap");
+  r.advance(1000);
+  swipeBy(r, 0, TOUCH.swipe * 3 + 5);
+  assert.deepEqual(r.calls.filter((c) => c !== "start"), ["panel true"]);
+  // any other touch device: as it was, and nothing is set
+  const a = rig();
+  const plain = installTouch({ win: a.win, doc: a.doc });
+  assert.equal(plain.unit, 1);
+  assert.equal(a.html.style["--unit"], undefined);
+  assert.equal(a.meta.content, VIEWPORT);
+  // a mouse: no touch layer, no scale
+  assert.equal(installTouch({ win: { ...media(() => false), navigator: IPHONE, devicePixelRatio: 3 }, doc: {} }).unit, 1);
 });
 
 test("a tap at the top of the story's picture brings the panel; anywhere else it is the story's", () => {

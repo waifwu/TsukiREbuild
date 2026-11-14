@@ -1,9 +1,10 @@
 /* touch.css - a phone or a tablet, played by touch in landscape (js/touch.js sets html.touch; nothing here applies without it).
    The measures are js/touch.js TOUCH's, in the stage's 1920 x 1080 pixels. */
 
-/* its paddings are the safe area's insets, read by touch.js to fit the stage beside a notch and above the home bar */
+/* its paddings are the safe area's insets, read by touch.js to fit the stage beside a notch and above the home bar. The browser gives them
+   in the screen's points: --unit is the page's pixels in one (touch.js fitPage; an iPhone's page is laid out in screen pixels). */
 #touch-safe { position: fixed; left: 0; top: 0; width: 0; height: 0; visibility: hidden; pointer-events: none;
-  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  padding: calc(env(safe-area-inset-top, 0px) * var(--unit, 1)) calc(env(safe-area-inset-right, 0px) * var(--unit, 1)) calc(env(safe-area-inset-bottom, 0px) * var(--unit, 1)) calc(env(safe-area-inset-left, 0px) * var(--unit, 1)); }
 #rotate, #touch-back, #touch-hint { display: none; }
 
 /* The page stands still: no pull to refresh, no double-tap or pinch zoom, no selection, no long-press sheet, no tap highlight.

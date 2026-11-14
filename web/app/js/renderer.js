@@ -6,6 +6,7 @@ import { clipShift, hazeConstants, impactPixels, layerShiftPixels } from "./effe
 import { place, clipGeometry, panelRuns, groupModes, plainGroups, groupCoverage, groupNeedsBuffer, groupOpacity, groupRelative, blurSigma, blurName } from "./transform.js";
 import { grainSample, linesSample, splitSample } from "./screenfx.js";
 import { asset } from "./lang.js";
+import { appleTouch } from "./touch.js";
 const F = 1.5;
 const MIN_TEXTURES = 192 * 1024 * 1024;   // the least the picture textures are cut back to when the GPU runs out of room (upload)
 // STBR's number -> the shader that draws the layer, as positions in the engine's shader table (0x264668). The draw
@@ -634,8 +635,10 @@ export class Renderer {
     this.files = new Map();   // name -> { read, done }: the pictures' files kept as they came (file)
     // What the GPU takes: the longest side of a texture, and how much of them is kept (evict). The machines with the 4096 limit and those that
     // say they have little memory are the ones with little room for textures, which upload lowers again when the GPU has none left.
+    // An iPhone or an iPad says neither (Safari has no deviceMemory, and its limit is a desktop's), and its browsers end a page that takes
+    // much, reloading it: counted as a desktop it kept 1400 MB of pictures (issue 8). It is given the least.
     this.maxSide = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
-    const memory = globalThis.navigator?.deviceMemory || 8;
+    const memory = globalThis.navigator?.deviceMemory || (appleTouch(globalThis) ? 2 : 8);
     this.limit = (this.maxSide <= 4096 || memory <= 2 ? 400 : memory <= 4 ? 700 : 1400) * 1024 * 1024;
     this.blurCache = new Map();
     this.fade = null;

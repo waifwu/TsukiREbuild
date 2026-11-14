@@ -13,7 +13,8 @@ export const TOUCH = {
   // touch-first: the first pointer is coarse and cannot hover. A laptop with a touch screen has a fine first pointer, a
   // narrow desktop window has a mouse, a tablet with a mouse attached reports that mouse: none of them match.
   query: "(hover: none) and (pointer: coarse)",
-  // The story's gestures, in CSS pixels (what a finger travels, whatever the stage's scale) and milliseconds: a tap may
+  // The story's gestures, in the screen's points (what a finger travels, whatever the stage's scale: CSS pixels, but on an iPhone, where a
+  // point is several of them, fitPage) and milliseconds: a tap may
   // wander `slop`; past `swipe` the press is a swipe; held still for `hold` it fast forwards; a second finger within
   // `two` of the first makes a two-finger tap. `after`: how long a click that follows a gesture is passed over.
   slop: 14, swipe: 44, hold: 420, two: 350, after: 400,
@@ -91,6 +92,31 @@ export function touchFirst(win = globalThis) {
   try { const q = new URLSearchParams(win.location?.search || ""); if (q.has("touch")) forced = q.get("touch") !== "0"; } catch { /* no address */ }
   if (forced !== null) return forced;
   try { return !!win.matchMedia?.(TOUCH.query)?.matches; } catch { return false; }
+}
+
+// An iPhone or an iPad, in any of its browsers (all of them are WebKit there). An iPad may call itself a Mac: a Mac has no touch points.
+export function appleTouch(win = globalThis) {
+  const n = win.navigator;
+  if (!n) return false;
+  return /iPhone|iPad|iPod/.test(n.userAgent || "") || (n.vendor === "Apple Computer, Inc." && n.maxTouchPoints > 1);
+}
+
+// The page's own scale on an iPhone or an iPad. WebKit draws each layer of a page at its laid-out size times the screen's density, however
+// small a transform shows it: the 1920 x 1080 stage, shown at about a third on a phone, had every layer drawn in nine times the pixels it was
+// shown in (iOS 18.5, an iPhone 16 Pro Max: 580 MB of drawing surfaces with Save open, 185 in the story), and a page that takes that much on
+// top of its pictures is ended and reloaded (issue 8: Save, Load and the flowchart on an iPhone). So there the page is laid out one CSS pixel
+// to a screen pixel (the viewport's scale 1 / devicePixelRatio): the stage's own scale comes to about 1 and a layer is drawn at the size it
+// is shown (Save: 168 MB, the story 125). Returns the CSS pixels in one of the screen's points, 1 where nothing was changed: what a finger
+// travels and the safe area's insets, which the browser goes on giving in points, are multiplied by it. Chrome draws a layer at the size
+// it is shown, so an Android device is left as it was.
+export function fitPage(win, doc) {
+  const dpr = win.devicePixelRatio || 1;
+  if (!appleTouch(win) || !(dpr > 1)) return 1;
+  const meta = doc.querySelector?.('meta[name="viewport"]');
+  if (!meta) return 1;
+  const s = 1 / dpr;
+  meta.setAttribute("content", `width=device-width,initial-scale=${s},minimum-scale=${s},maximum-scale=${s},user-scalable=no,viewport-fit=cover`);
+  return dpr;
 }
 
 // The 1920 x 1080 stage in a w x h window with the safe area's insets: as large as fits inside the insets, and centred in
@@ -196,12 +222,13 @@ export class FrameGate {
 }
 
 const ART = "/assets/ui";
-const NONE = { on: false, held: false, bind() {}, place() {}, storyClick: () => false, learned() {} };
+const NONE = { on: false, unit: 1, held: false, bind() {}, place() {}, storyClick: () => false, learned() {} };
 
 // Everything a touch device needs outside the screens themselves. Called first thing by main.js, before any other
 // listener is added, so that this one's come first: the rotate screen can keep every event from the game, and a click
 // that belongs to a gesture can be taken before anything acts on it. Returns the object main.js and ui.js ask:
 //   on           touch-first
+//   unit         the CSS pixels in one of the screen's points (fitPage)
 //   held         the rotate screen is up
 //   place(stage) fits the stage (main.js fitStage)
 //   bind(o)      the game's parts, once they exist: { ui, vm, audio, act: { fast(down), log(), hide(), choosing(), movie(), refit() } }
@@ -210,7 +237,9 @@ export function installTouch({ win = window, doc = document } = {}) {
   if (!touchFirst(win)) return NONE;
   const root = doc.documentElement, T = TOUCH;
   root.classList.add("touch");
-  const touch = { on: true, held: false, ui: null, vm: null, audio: null, act: null };
+  const unit = fitPage(win, doc);
+  if (unit !== 1) root.style.setProperty?.("--unit", String(unit));   // touch.css: the safe area's insets, in the page's pixels
+  const touch = { on: true, unit, held: false, ui: null, vm: null, audio: null, act: null };
   // the art only a touch device draws, read now: the rotate screen has it the moment the device is turned
   for (const a of ["DISP_PARTS_JA/back_btn", "DISP_PARTS_JA/voice_icon", "DISP_PARTS_JA/menuBG01_upscale", "DISP_PARTS_JA/mode_ring_1", "DIALOG_PARTS_JA/dialog_win", "TITLE_PARTS_JA/title_titlelog"]) {
     if (win.Image) new win.Image().src = `${ART}/${a}.webp`;
@@ -331,7 +360,7 @@ export function installTouch({ win = window, doc = document } = {}) {
   for (const type of ["gesturestart", "gesturechange", "gestureend"]) win.addEventListener(type, (e) => e.preventDefault(), { capture: true, passive: false });
 
   // ---- the story's gestures ----------------------------------------------------------------------------------------
-  const gesture = new StoryTouch();
+  const gesture = new StoryTouch(unit === 1 ? T : { ...T, slop: T.slop * unit, swipe: T.swipe * unit });   // (a finger's travel is the same on the glass)
   let holdTimer = null, fastOn = false, skipClick = 0, panelWas = false, plain = true;
   const story = () => !!touch.vm?.running && !touch.ui.open && !touch.act.movie();
   const passClick = () => { skipClick = Infinity; };
