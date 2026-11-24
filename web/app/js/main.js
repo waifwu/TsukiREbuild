@@ -14,6 +14,8 @@ import { openFlowchart } from "./flowchart.js";
 import { openGallery, preloadGallery } from "./gallery.js";
 import { welcomeDue, markWelcomed } from "./welcome.js";
 import { openHome, homeDue, showNoGl } from "./home.js";
+import { mediaLine, soundPlays } from "./formats.js";
+import { tr } from "./sitewords.js";
 import { LANG, ORIG, RU } from "./lang.js";
 import { HOST } from "./apphost.js";
 import { savesReplaced } from "./savefile.js";
@@ -67,6 +69,7 @@ addEventListener("pointerdown", (e) => {
 // With no WebGL 2 nothing can be drawn: the page says so, and how to turn it on (home.js NO_GL), and goes no further.
 const gfx = (() => { try { return new Renderer($("gl")); } catch (e) { showNoGl($("ui")); throw e; } })();
 const audio = new Audio();
+soundPlays();   // (asked now, answered long before the opening page or the title wants it)
 const text = new TextBox();
 
 function toast(msg, ms = 2000) {
@@ -1258,6 +1261,13 @@ async function loadingScreen() {
   await new Promise((done) => setTimeout(done, LOADING.out));   // the window's own way out (0.07 a frame)
 }
 
+// Where the browser refuses the game's sound (formats.js: WebKit before 18.4 has no Ogg) the game says so in its own notice window, once a visit, before
+// its title: otherwise it plays on in silence and the player looks for a volume that is off. Not where a sound of the game's has decoded, nor with ?mute.
+async function soundNotice() {
+  if (audio.muted || (await soundPlays()) || audio.decoded) return;
+  await ui.notify(tr(mediaLine("note")), { centred: true });
+}
+
 // ---- start ----------------------------------------------------------------------------------------------------
 (async () => {
   await vm.init();
@@ -1300,6 +1310,7 @@ async function loadingScreen() {
   touch.reorient?.();   // the game's own stage again, and in portrait the rotate screen
   fitStage();
   if (firstVisit) { await loadingScreen(); markWelcomed(); }   // ... and what the first screens use is waited for, under the game's "Loading"
+  await soundNotice();
   if (q.has("script")) {
     const name = q.get("script");
     const i = Number.isNaN(Number(name)) ? vm.index.names.indexOf(name) : Number(name);

@@ -150,7 +150,7 @@ export function loadedData(storage = globalThis.localStorage, { chart = null, ga
   const total = kinds.reduce((n, k) => n + k[0], 0);
   if (kinds.length === 1) facts.push([String(total), `${kinds[0][2]}${total === 1 ? "" : "s"} made here`]);
   else facts.push([String(total), kinds.length ? `saves made here: ${kinds.map(([n, how]) => `${n} ${how}`).join(", ")}` : "saves made here"]);
-  return { facts, file: loaded ? `${importedLabel(storage)} is loaded: these are its own. Your own are put aside until it is removed.` : null };
+  return { facts, file: loaded ? `${importedLabel(storage)} is loaded: the scenes, pictures and songs above are its own, and yours are put aside until it is removed. The saves are still the ones made here.` : null };
 }
 
 // ---- the file last imported, kept whole (4 MB: more than local storage has room for) ---------------------------------------------------------

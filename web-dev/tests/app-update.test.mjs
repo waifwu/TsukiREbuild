@@ -50,8 +50,10 @@ test("the apps open on the opening page: ABOUT, SAVE DATA, LANGUAGE and PLAY, wi
   assert.ok(!JSON.stringify(app).includes(".apk") && !JSON.stringify(app).includes("Tsukihime-win-x64.zip"), "no downloads");
   // ABOUT: the site's, but for the notice of which browsers the site works in (the source's section in it, as on the site)
   assert.equal(app[0].sections.length, site[0].sections.length);
-  assert.deepEqual(app[0].sections[0].blocks, site[0].sections[0].blocks.filter((b) => b[0] !== "note"));
-  assert.ok(site[0].sections[0].blocks.some((b) => b[0] === "note" && /Safari/.test(b[1])));
+  assert.deepEqual(app[0].sections[0].blocks, site[0].sections[0].blocks.filter((b) => b[0] !== "note" && b[0] !== "media"));
+  // (the site's red lines where the sound or the movies can't play, formats.js, in place of a note about Safari for everyone: the user, 2026-11-24)
+  assert.ok(site[0].sections[0].blocks.some((b) => b[0] === "media"));
+  assert.ok(!JSON.stringify(site[0].sections[0].blocks).includes("Safari"));
   assert.deepEqual(app[0].sections.map((s) => s.head), site[0].sections.map((s) => s.head));
   assert.equal(app[0].sections[1].head, "The source, on GitHub");
   // SAVE DATA: the same tools and list, saying where the app keeps things
@@ -66,7 +68,7 @@ test("the apps open on the opening page: ABOUT, SAVE DATA, LANGUAGE and PLAY, wi
   // user, 2026-11-14: "yes add jp too") on LANGUAGE, with a line saying Japanese and Chinese are downloaded when first chosen
   assert.deepEqual(app[3].sections.map((s) => s.head), ["Play", "Updates"]);
   assert.deepEqual(kinds(app[3]), ["langnow", "press", "update"]);
-  assert.deepEqual(kinds(site[4]), ["gpu", "langnow", "press"]);
+  assert.deepEqual(kinds(site[4]), ["gpu", "media", "langnow", "press"]);   // (media: the site's red lines where the sound or the movies can't play, formats.js; the apps have none)
   assert.deepEqual(LANG_PLATES.map((l) => l.plate), ["ENGLISH", "日本語", "中文", "PORTUGUÊS", "РУССКИЙ"]);   // (PORTUGUÊS only where its folder is: home.js langShown)
   // (what each language is: a short list under the plates, a row a language, and one line under it; the user, 2026-11-16, of a long wrapped
   // paragraph: "looks messy")

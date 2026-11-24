@@ -14,10 +14,11 @@ export function markWelcomed() {
 }
 
 // A section: its name, its heading and its blocks: a string is a paragraph, ["h", text] a sub-heading, ["facts", [[number, what], ...]] a row of figures, "logo" the game's logo,
-// ["rows", [[name, what, font?], ...]] a list of names, each set in the font given if there is one, ["note", text] a short notice.
+// ["rows", [[name, what, font?], ...]] a list of names, each set in the font given if there is one, ["note", text] a short notice, ["media"] the red lines
+// where this browser can't play the game's sound or its movies, and only there (home.js mediaBlock, formats.js).
 export const SECTIONS = [
   { tab: "ABOUT", head: "Tsukihime remake in a browser", blocks: [
-    ["note", "For Chrome and Firefox. It does not work in Safari: the movies are AV1 video, which Safari plays only on Apple's newest hardware."],
+    ["media"],
     "logo",
     "This is the Tsukihime remake, Tsukihime -A piece of blue glass moon-, running in a web page. There is no emulator and no native code here: the game's engine was rewritten in JavaScript and WebGL2, and that new engine plays the game's own scripts, pictures, voices and music.",
     "It grew out of a Windows and Linux port made by recompiling the Nintendo Switch executable. That native build became the reference for this one. Whenever the browser version had to decide how something should look, sound or move, the answer was taken from the game.",

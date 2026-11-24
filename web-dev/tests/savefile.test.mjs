@@ -216,7 +216,7 @@ test("what the browser holds now, for SAVE DATA's page: four figures counted as 
   importSaves(readSaves(exportSaves(memory(stored()))), fresh);
   const data = loadedData(fresh, { chart, gallery });
   assert.equal(data.facts.length, 4);
-  assert.match(data.file, /^savedata000 is loaded: these are its own\. Your own are put aside until it is removed\.$/);
+  assert.match(data.file, /^savedata000 is loaded: the scenes, pictures and songs above are its own, and yours are put aside until it is removed\. The saves are still the ones made here\.$/);
   removeImported(fresh);
   assert.equal(loadedData(fresh, { chart, gallery }), null);
   // side by side across the page: the page's own figures, four to a row (two on a phone held upright)
@@ -247,7 +247,7 @@ test("the 100% save: a finished game's progress bundled with the app, loaded ove
   assert.equal(store.getItem("tsuki.settings"), mine["tsuki.settings"]);
   assert.equal(store.getItem("tsuki.volumes"), mine["tsuki.volumes"]);
   assert.equal(importedLabel(store), "The 100% save");
-  assert.match(loadedData(store).file, /^The 100% save is loaded: these are its own\. Your own are put aside until it is removed\.$/);
+  assert.match(loadedData(store).file, /^The 100% save is loaded: the scenes, pictures and songs above are its own, and yours are put aside until it is removed\. The saves are still the ones made here\.$/);
   // a file imported over it, then the 100% save again: the label follows, what is aside stays the player's own
   importSaves(sys, store);
   assert.equal(importedLabel(store), "savedata000");
@@ -286,7 +286,7 @@ test("the Ciel route save: a game with Arcueid's route played to its end (G003 s
   importSaves(sys, store, { label: SAVE_TEXT.ciel, keepSettings: true });
   assert.equal(store.getItem("tsuki.settings"), mine["tsuki.settings"]);
   assert.equal(JSON.parse(store.getItem("tsuki.globals")).G003, 1);
-  assert.match(loadedData(store).file, /^The Ciel route save is loaded: these are its own\. Your own are put aside until it is removed\.$/);
+  assert.match(loadedData(store).file, /^The Ciel route save is loaded: the scenes, pictures and songs above are its own, and yours are put aside until it is removed\. The saves are still the ones made here\.$/);
   assert.equal(removeImported(store), true);
   assert.deepEqual(Object.fromEntries(store.map), mine);
   // made by the tool, which plays the route through the port's engine

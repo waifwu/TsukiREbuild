@@ -10,6 +10,7 @@ globalThis.sessionStorage = store();
 const H = await import("../../web/app/js/home.js");
 const W = await import("../../web/app/js/welcome.js");
 const U = await import("../../web/app/js/update.js");
+const F = await import("../../web/app/js/formats.js");
 const { tr, trBlock, localize } = await import("../../web/app/js/sitewords.js");
 const { SITE_JA, SITE_ZH, SITE_PT, SAME } = await import("../../web/app/js/sitewords-table.js");
 const { SITE_RU } = await import("../../web/app/js/sitewords-ru.js");
@@ -34,6 +35,7 @@ function pageStrings() {
   add(H.NO_GL.head); add(H.NO_GL.why); block(["rows", H.NO_GL.rows]);
   for (const v of Object.values(H.SAVE_TEXT_EN)) add(v);
   for (const v of Object.values(U.UPDATE_TEXT)) add(v);
+  for (const v of Object.values(F.MEDIA_TEXT)) add(v);
   for (const app of [null, "android"]) add(H.langLineFor(app).note);
   add(H.EN_LINE.head); add(H.EN_LINE.note);
   block(["rows", H.LANG_ROWS]);
@@ -95,7 +97,7 @@ test("words made of parts: file names, sizes, versions, a language's name and th
   assert.match(tr(H.noneLine(H.TABS), "ja"), /「概要」「ダウンロード」「セーブデータ」「言語」、ゲームを始めるなら「プレイ」。$/);
   assert.match(tr(H.noneLine(H.tabsFor("android")), "zh"), /“关于”、“存档”、“语言”，或选择“游玩”开始游戏。$/);
   assert.equal(tr("saves made here: 3 in the list, 1 automatic", "ja"), "ここで作ったセーブ：一覧 3、自動 1");
-  assert.match(tr("The 100% save is loaded: these are its own. Your own are put aside until it is removed.", "zh"), /^已载入100% 存档：/);
+  assert.match(tr("The 100% save is loaded: the scenes, pictures and songs above are its own, and yours are put aside until it is removed. The saves are still the ones made here.", "zh"), /^已载入100% 存档：/);
   assert.equal(tr("Saved as savedata000.", "pt"), "Salvo como savedata000.");
   assert.equal(tr("Loaded savedata000.", "pt"), "savedata000 carregado.", "a file's name keeps its small letter");
   assert.equal(tr("Loaded the 100% save.", "pt"), "Save 100% carregado.");
@@ -104,7 +106,7 @@ test("words made of parts: file names, sizes, versions, a language's name and th
   assert.match(tr(H.noneLine(H.TABS), "pt"), /SOBRE, BAIXAR, DADOS SALVOS, IDIOMA ou JOGAR ONLINE para começar o jogo\.$/);
   assert.equal(tr("saves made here: 3 in the list, 1 automatic", "pt"), "saves feitos aqui: 3 na lista, 1 automático");
   assert.equal(tr("saves made here: 1 in the list, 2 automatic", "pt"), "saves feitos aqui: 1 na lista, 2 automáticos");
-  assert.match(tr("The 100% save is loaded: these are its own. Your own are put aside until it is removed.", "pt"), /^O save 100% está carregado: /);
+  assert.match(tr("The 100% save is loaded: the scenes, pictures and songs above are its own, and yours are put aside until it is removed. The saves are still the ones made here.", "pt"), /^O save 100% está carregado: /);
   assert.equal(tr("Something new.", "ja"), "Something new.", "English where there is nothing");
   assert.equal(tr("Language", "en"), "Language");
 });

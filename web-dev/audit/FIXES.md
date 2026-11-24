@@ -2308,4 +2308,52 @@ game's H.264 (libx265 medium, `hvc1`, faststart), size and VMAF against the H.26
 / 96.4, crf 24 0.69 MB / 94.2; op2_ciel AV1 81.9 MB / 77.5, crf 24 66.9 MB / 76.0, crf 28 36.8 MB / 73.7; prologue AV1 34.2 MB / 96.8, crf
 24 19.8 MB / 95.6, crf 28 15.0 MB / 94.4; the three trial files play in the M2 WKWebView (decoded at 1920 x 1080, time running). No
 Japanese or Chinese choice label has a reading (the 122 SEL commands' texts), so the readings' spans appear only where the rules reach. A copy of all 104 movies (567 MB of AV1, 57 minutes) at about the AV1's quality would be some
-400-550 MB; R2 held 8.91 GB on 2026-11-23. Left for the user (the bucket is theirs).
+400-550 MB; R2 held 8.91 GB on 2026-11-23. The user declined the copies the same day ("no need"), and then HEVC in place of AV1 ("Keep AV1": it would
+silence PCs without HEVC hardware): movies stay AV1 only, and Safari without AV1 hardware plays none (working folder note, after the push
+of 047e17a9).
+
+## SAVE DATA says the save list is not in savedata000 (GitHub issue 3, comment of 2026-11-24), 2026-11-24
+
+**Reported:** a player exported savedata000 from the Android app, imported it in the PC app, read "savedata000 is loaded: these are its own",
+and found Load Game still listing the PC's saves; they asked whether Export / Import are meant to carry progress only.
+**Before:** they are (the user, 2026-11-12: "no need for save slot"): `IMPORTED` has no `tsuki.saves`, `tsuki.autosaves` or `tsuki.quicksave`,
+and Export writes the system data alone. The page never said so. The loaded line sat under four figures, the fourth being the saves made
+here, and called them all the file's; the format line said "a save from the Switch game can be loaded here"; the app's PLAY line said SAVE
+DATA "saves them" (saves, settings and progress) as a file; and the plates read EXPORT SAVES and IMPORT SAVES.
+**Changed (words only; what goes across is as it was):** the format line ("the Switch game's progress can be loaded here"), Export ("The saves
+made here are not in it; they stay here."), Import ("..., not its saves: the save list keeps the saves made here. Your own settings and
+progress are put aside, not lost."), the loaded line (`savefile.js` loadedData: "X is loaded: the scenes, pictures and songs above are its
+own, and yours are put aside until it is removed. The saves are still the ones made here.") and the app's PLAY line ("SAVE DATA saves the
+settings and progress as a file"), with their Japanese, Chinese, Portuguese and Russian (`sitewords-table.js`, `sitewords-ru.js`; Russian's
+format lines already said only that the file is read on both sides, so they keep their words). No letter new to the Chinese table (its
+fonts are cut to it). The plates' art (EXPORT SAVES, IMPORT SAVES) is unchanged.
+**Checked:** `savefile.test.mjs` and `sitewords.test.mjs` quote the new loaded line; 804 pass, 3 skipped. The SAVE DATA page at 1600 x 900
+in Playwright (own profile) with a file marked loaded: the loaded line and the Export / Import rows wrap inside the column.
+
+## The page says where the game's sound or its movies can't play, 2026-11-24
+
+**Reported:** a player on an iPad Pro 11-inch (4th generation, M2), iPadOS 17.7, in Chrome: no sound at all, with every volume on.
+**Cause:** every sound is Ogg Opus, and WebKit opens Ogg only from Safari 18.4 (iOS and iPadOS 18.4, macOS 15.4: webkit.org/blog/16574,
+MDN's Containers page). Before that each decode is refused; `audio.js` only `console.warn`s it, so the game played on in silence and the
+page said nothing. Every browser on an iPhone or an iPad is the same WebKit. Inferred from Apple's notes: no iOS 17 runtime here to run it.
+**Changed (the user: "add the notice", PLAY ONLINE's Safari line only where AV1 can't play, in red):** `formats.js` (new): `soundPlays()`
+decodes a 177-byte Ogg Opus of silence once with an `OfflineAudioContext` (callbacks and promise both), and answers false only on a refusal
+(a throw, no decoder or no answer in 3 s count as playing); `moviesPlay()` is `canPlayType` of the movies' own codec, `av01.0.08M.08`,
+false only for "". PLAY ONLINE's line is now "Plays in Chrome or Firefox, on a computer, phone or tablet. Saves and progress stay in this
+browser." (on an iPhone or an iPad: "On an iPhone or iPad every browser is Safari underneath, ..."), with `["media"]` under it: in red
+(`.hm-cant`, #ff7a7a) the sound's line and the movies' line, each only where it is so and never once a sound of the game's has decoded
+(`audio.decoded`), worded for the device (an iPhone or an iPad is never told to try Chrome or Firefox; it is told iOS / iPadOS 18.4 and
+Settings › General › Software Update). `main.js` `soundNotice()`: where the sound can't play, the game's own notice window says so once,
+after the first screens and before the title or the story (not with `?mute`). Words in Japanese, Chinese, Portuguese and Russian; every
+Chinese letter was already in the Chinese faces' sources. ABOUT's first note ("For Chrome and Firefox. It does not work in Safari: ...",
+shown to everyone) is now the same `["media"]` block, set as a note (centred, `wl-note hm-cant`), at the user's word ("Yes, same rule"); its
+words are out of the four tables; the apps leave it out as they left the note. The movie line in "How it was made" ("AV1 is why this does
+not work in Safari.") is unchanged.
+**Checked:** `formats.test.mjs` (new), `sitewords.test.mjs` walks the new words, `app-update.test.mjs`; 808 pass, 3 skipped. Firefox 160
+(WebDriver BiDi): sound and movies play, no red line. Chromium (Playwright, own profile): no red line; with the decode refused and `av01`
+answered "" both lines in red at 1600 x 900, the notice in the game's window, the story going on after it; as an iPad (1194 x 834, touch)
+the iPhone / iPad words, PRESS ANY BUTTON reached by scrolling; as an upright iPhone the notice waits under the rotate screen and comes up
+once the phone is turned (then closes itself after its 480 frames). The notice in English, Japanese, Chinese, Portuguese and Russian, both
+wordings: two or three rows, all inside the window. The iOS 18.5 simulator's Safari: no red line, the iPhone's own line. Not run on a
+real iPad on 17.x. ABOUT, Chromium: nothing above the logo; with the refusal stubbed the two red lines centred above it, the iPhone /
+iPad words as an iPad.

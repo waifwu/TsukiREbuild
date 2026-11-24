@@ -13,7 +13,8 @@
 // page has the app's updates (update.js). What a browser does for the page the app does through apphost.js: Export's file goes where the player
 // chooses, and a link opens in the system's browser.
 import { sprite, quickBarArt, panelBack } from "./ui.js";
-import { TOUCH } from "./touch.js";
+import { TOUCH, appleTouch } from "./touch.js";
+import { MEDIA_TEXT, mediaLine, moviesPlay, soundPlays } from "./formats.js";
 import { ButtonState, pressPulse } from "./uifx.js";
 import { SECTIONS, TOUCH_INTRO, blockEl } from "./welcome.js";
 import { ENGLISH, LANG, UILANG, asset, chooseEnglish, chooseLang } from "./lang.js";
@@ -43,9 +44,12 @@ export function homeDue(query) {
 
 // The tabs: a plate, and the sections its page shows, each a heading and blocks as welcome.js draws them, plus ["link", text, address, file name if a
 // download], ["data"], what the browser holds now, ["saves"], SAVE DATA's plates, ["lang"], the language's plates, ["langnow"], the line on PLAY
-// naming the language the game starts in, ["update"], the app's updates, and ["press"], the prompt that starts the game.
+// naming the language the game starts in, ["update"], the app's updates, ["media"], PLAY's lines in red where the browser can't play the game's sound or its
+// movies (formats.js), and ["press"], the prompt that starts the game.
 // The site's PLAY ONLINE only (the apps have no browser full screen to leave), and not by touch, where there is no F key.
 const FULL_KEY_LINE = "Press F to exit fullscreen.";
+// PLAY ONLINE's line for everyone; on an iPhone or an iPad its own (formats.js MEDIA_TEXT.playApple), where every browser is Safari's WebKit.
+const PLAY_LINE = "Plays in Chrome or Firefox, on a computer, phone or tablet. Saves and progress stay in this browser.";
 // Where the source is: what was the GITHUB tab, in ABOUT since 2026-11-16 (the user: "put everything from Github Tab in About"), after its first section.
 const SOURCE = { head: "The source, on GitHub", blocks: [
     "Everything this was made with is in one repository: the engine rewritten in JavaScript and WebGL2, the tools that turned the game's files into what this page plays, the tests, and the notes on how each part was checked against the game itself.",
@@ -108,12 +112,12 @@ const SITE_TABS = [
   ] },
   { plate: "SAVE DATA", sections: [{ head: "Your save data", blocks: [
     "Saves, settings and progress are kept in this browser: clearing the site's data removes them, and another browser or device starts with none.",
-    "Export and Import use the Nintendo Switch game's own save format, the file savedata000: the original game reads what Export writes, and a save from the Switch game can be loaded here.",
+    "Export and Import use the Nintendo Switch game's own save format, the file savedata000: the original game reads what Export writes, and the Switch game's progress can be loaded here.",
     ["data"],
     ["saves"],
     ["rows", [
-      ["Export", "Saves the settings and progress shown above as savedata000: the flowchart, the gallery, what has been read."],
-      ["Import", "Loads the settings and progress of a savedata000 here. Your own are put aside, not lost."],
+      ["Export", "Saves the settings and progress shown above as savedata000: the flowchart, the gallery, what has been read. The saves made here are not in it; they stay here."],
+      ["Import", "Loads the settings and progress of a savedata000 here, not its saves: the save list keeps the saves made here. Your own settings and progress are put aside, not lost."],
       ["Remove", "Takes the imported file, the 100% save or the Ciel route save out again, and your own settings and progress are back as they were. The saves you make here are yours throughout."],
       ["100% save", "Loads a finished game's progress, with everything open. It warns and asks first; your own progress is put aside, and your settings stay."],
       ["Ciel route", "Loads a save in which Arcueid's route has been played to its end, which is what opens Ciel's route. It asks first; your own progress is put aside, and your settings stay."],
@@ -122,7 +126,8 @@ const SITE_TABS = [
   LANGUAGE_TAB,
   { plate: "PLAY ONLINE", sections: [{ head: "Play in the browser", blocks: [
     ["gpu"],
-    "Plays in Chrome or Firefox, on a computer, phone or tablet; not in Safari, which plays the AV1 movies only on Apple's newest devices. Saves and progress stay in this browser.",
+    PLAY_LINE,
+    ["media"],
     FULL_KEY_LINE,
     ["langnow"],
     ["press"],
@@ -132,16 +137,16 @@ const SITE_TABS = [
 // and PLAY: everything is in the app, so its page has no notice about the browser's graphics setting; the language it starts in over the prompt, as on
 // the site, and under it the app's updates (["update"], update.js).
 const APP_TABS = [
-  { plate: "ABOUT", sections: SITE_TABS[0].sections.map((s, n) => (n ? s : { head: s.head, blocks: s.blocks.filter((b) => b[0] !== "note") })) },
+  { plate: "ABOUT", sections: SITE_TABS[0].sections.map((s, n) => (n ? s : { head: s.head, blocks: s.blocks.filter((b) => b[0] !== "note" && b[0] !== "media") })) },
   { plate: "SAVE DATA", sections: [{ head: "Your save data", blocks: [
     "Saves, settings and progress are kept in this app, apart from the website's: removing the app, or clearing its data, removes them, and another device starts with none.",
-    "Export and Import use the Nintendo Switch game's own save format, the file savedata000: the original game reads what Export writes, and a save from the Switch game can be loaded here. The website's SAVE DATA page reads and writes the same file, so progress goes between the two that way.",
+    "Export and Import use the Nintendo Switch game's own save format, the file savedata000: the original game reads what Export writes, and the Switch game's progress can be loaded here. The website's SAVE DATA page reads and writes the same file, so progress goes between the two that way.",
     ...SITE_TABS[2].sections[0].blocks.slice(2),
   ] }] },
   LANGUAGE_TAB,
   { plate: "PLAY", sections: [
     { head: "Play", blocks: [
-      "Everything the game plays is inside this app: no connection is needed, and nothing is fetched while you play. Saves, settings and progress are kept in the app; SAVE DATA saves them as a file.",
+      "Everything the game plays is inside this app: no connection is needed, and nothing is fetched while you play. Saves, settings and progress are kept in the app; SAVE DATA saves the settings and progress as a file.",
       ["langnow"],
       ["press"],
     ] },
@@ -625,6 +630,15 @@ export async function openHome(ui, { started = null } = {}) {
       parts.push(rows, el("p", "hm-lang-note", tr(langLine.note)));
       langBox.replaceChildren(...parts);
     };
+    // PLAY's and ABOUT's lines in red, only where they are so: the sound's (the decode is asked once, formats.js, and the line comes when it answers; never
+    // once a sound of the game's has decoded), then the movies'. On ABOUT they stand where its note stood, set as a note.
+    const mediaBlock = () => {
+      const cls = tab === ABOUT ? "wl-note hm-cant" : "hm-cant";
+      const box = el("div", "hm-media"), line = (kind) => el("p", cls, tr(mediaLine(kind)));
+      if (!moviesPlay()) box.append(line("movies"));
+      soundPlays().then((ok) => { if (!ok && !ui.audio.decoded) box.prepend(line("sound")); });
+      return box;
+    };
     const langBlock = () => {
       langBox = el("div", "hm-lang");
       drawLang();
@@ -637,6 +651,8 @@ export async function openHome(ui, { started = null } = {}) {
         return el("p", "hm-centre hm-langnow", `${tr(now)} ${tr(LANG_NOW.change)}`);
       }
       if (b[0] === "update") return updateBlock();
+      if (b[0] === "media") return mediaBlock();
+      if (b === PLAY_LINE && appleTouch()) return blockEl(trBlock(MEDIA_TEXT.playApple));
       if (b[0] === "saves") return savesBlock();
       if (b[0] === "data") return dataBlock();
       if (b[0] === "press") {

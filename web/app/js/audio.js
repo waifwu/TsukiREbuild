@@ -379,6 +379,7 @@ export class Audio {
     })();
     this.buffers.set(url, p);
     p.then((buf) => {
+      this.decoded = true;   // (a sound has played here: formats.js's warning is never shown then)
       if (this.buffers.get(url) !== p) return;
       this.sizes.set(url, { buf, bytes: soundBytes(buf) });
       this.trim();
