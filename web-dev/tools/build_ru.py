@@ -12,12 +12,14 @@ The translation is of the English's kind (the Tsukihimates scripts, lines number
     The Russian lines are written for these scripts, so the language plays its own (languages.js "scripts": "ru") and a save is carried between the two
     by its line (langsave.js), as between English and Japanese.
   - It is unfinished. It has the prologue, all of Arcueid's route and Ciel's route up to the first branch on day 14; what it has not translated (the
-    other branch of Ciel's day 14, day 15, the Q&A corners) is left in Japanese in its files, on scripts changed towards the Japanese ones. A scene with
-    any Japanese line left is played in English whole here: the English lines on the English script (the port's own files, so nothing of it is in ru/).
-    A few Russian lines in those scenes (names, a choice) go with them.
+    other branch of Ciel's day 14, day 15, the Q&A corners) was left in Japanese in its files, on scripts changed towards the Japanese ones; the
+    text.json they sent on 2026-11-25 has the English there instead (untranslated). A scene with any line left untranslated is played in English whole
+    here: the English lines on the English script (the port's own files, so nothing of it is in ru/). A few Russian lines in those scenes (names, a
+    choice) go with them.
 
-  ru/text.json            every line: the Russian of the scenes it has, the English everywhere else. Three marks its files have letter for letter in
-                          Cyrillic (a Latin-to-Cyrillic table was run over the whole file) are put back: @g, @t, @k.
+  ru/text.json            every line: the Russian of the scenes it has, the English everywhere else. Three marks the 2026-11-22 files had letter for
+                          letter in Cyrillic (a Latin-to-Cyrillic table was run over the whole file) are put back: @g, @t, @k (the 2026-11-25 text.json
+                          has them right).
   ru/scripts/N.json       the translators' script, for the Russian scenes whose script is not the English one
   ru/system.json          the system's words (laid over the shared table: vm.js init)
   ru/flowchart.json, ru/gallery.json   titles, notes and credits
@@ -51,6 +53,7 @@ FONT_NAME = "Russian Story"
 
 CYRILLIC = re.compile("[Ѐ-ӿ]")
 JAPANESE = re.compile("[぀-ヿ一-鿿]")
+LATIN_WORD = re.compile("[A-Za-z\ue000-\uf8ff]{2,}")
 LINE = re.compile(r"\$(\d+)")
 # The marks as the patch's files have them: the mark's letter went through the same Latin-to-Cyrillic table as the Japanese left in the file ("7.62mm"
 # is "7.62оо" there). @g: the second face to the end of the line, @t: two parts typed side by side, @k: wait for a key.
@@ -58,6 +61,17 @@ MARKS = {"@и": "@g", "@х": "@t", "@м": "@k"}
 # The Q&A corners' balloons: the patch has thirteen of them in the original's sizes, and its corners are not translated. Here the corners are the
 # English ones, lines and rows, so their balloons are the English ones too (the shared pictures).
 BALLOONS = "tw_t_L"
+# Rows the translators set flush against the text box's right edge with spaces (the 2026-11-25 text.json): leading ones, or in 23613 the gap
+# before its second part (@t), its two parts side by side on one row. In the port's face each of these ends under 8 px from the edge, or past it:
+# the port itself breaks 31490 in two, and WebKit, which sets a row a pixel or two wider than Chromium, breaks several more (measured:
+# 03_00_ARC03_5B's mirrored lines, 09_01_CIEL09_6, 12_01_CIEL12_4B, 13_01_01_CIEL13_5B). One space less (10 px) keeps each row whole; nothing else
+# in the line changes. Text id -> (spaces in the line's longest run of them in their file, spaces kept). Measured in Chromium with the story face
+# at 44 px and its letter spacing; a line whose run no longer has the count measured stops the build, so a new text.json is measured again.
+FLUSH_RIGHT = {
+    4527: (62, 61), 4529: (72, 71), 4531: (89, 88), 8449: (70, 69), 31427: (42, 41), 31490: (102, 101), 31600: (130, 129), 31602: (90, 89),
+    31604: (95, 94), 31606: (85, 84), 33447: (58, 57), 33449: (73, 72), 35092: (52, 51), 35106: (114, 113), 35927: (110, 109), 35929: (96, 95),
+    35931: (107, 106), 35933: (92, 91), 23613: (37, 36),
+}
 
 
 def load(path):
@@ -80,6 +94,13 @@ def japanese(line):
     return bool(JAPANESE.search(line))
 
 
+def untranslated(line, english):
+    """A line the translation has not done. The 2026-11-22 text.json left those in Japanese; the one they sent on 2026-11-25 has the port's English
+    line there instead (the same 56 scenes either way): a line with words in Latin letters (or the English's italic letters, U+E000-U+F8FF) and no
+    Cyrillic that is the English line itself."""
+    return japanese(line) or (line == english and not CYRILLIC.search(line) and bool(LATIN_WORD.search(line)))
+
+
 def plan(source=SOURCE, assets=ASSETS):
     """What is Russian: {"russian": the scripts played in Russian, "english": those played in English, "own": the Russian ones whose script is the
     translators' own, "text": every line}."""
@@ -99,7 +120,7 @@ def plan(source=SOURCE, assets=ASSETS):
         ids = lines_of(script)
         if ids != lines_of(json.loads(mine)):
             raise SystemExit(f"script {i}: the patch's names other lines than the port's")
-        if any(japanese(ru[k]) for k in ids):
+        if any(untranslated(ru[k], en[k]) for k in ids):
             english.append(i)
             drop |= ids
             continue
@@ -112,11 +133,16 @@ def plan(source=SOURCE, assets=ASSETS):
     text = []
     for k, line in enumerate(ru):
         # a line of a Russian scene is the patch's; a line of no scene (the system's own) too, unless it was left in Japanese
-        mine = k in keep or (k not in drop and not japanese(line))
+        mine = k in keep or (k not in drop and not untranslated(line, en[k]))
         if mine and CYRILLIC.search(line):
             for mark, real in MARKS.items():
                 line = line.replace(mark, real)
         text.append(line if mine else en[k])
+    for k, (theirs, kept) in FLUSH_RIGHT.items():
+        run = max(re.finditer(" +", text[k]), key=lambda m: len(m.group()), default=None)
+        if not run or len(run.group()) != theirs:
+            raise SystemExit(f"line {k}: its longest run of spaces is not the {theirs} FLUSH_RIGHT was measured for: measure its row again")
+        text[k] = text[k][:run.start()] + " " * kept + text[k][run.end():]
     return {"russian": russian, "english": english, "own": own, "text": text, "shared": sorted(keep & drop)}
 
 

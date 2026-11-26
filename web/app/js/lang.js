@@ -121,6 +121,7 @@ export const overlays = (rel) => (own.get(rel) || []).map((layer) => packed.get(
 // would have to be wrapped here first.
 const REVISED = {
   "img/IMG0316.avif": 2,   // the tree's cut-out, so the Ciel Day 9 scene has no bright rectangles (GitHub issue 7)
+  "movie/phasetitle_14_01.mp4": 2,   // Russian's chapter title re-encoded by its translators (AV1; it was H.264), 2026-11-25
 };
 
 // A script as the language has it. Chinese's scripts are Japanese's, but for the rows of the messages laid out together with others (the engine's own,

@@ -2357,3 +2357,31 @@ once the phone is turned (then closes itself after its 480 frames). The notice i
 wordings: two or three rows, all inside the window. The iOS 18.5 simulator's Safari: no red line, the iPhone's own line. Not run on a
 real iPad on 17.x. ABOUT, Chromium: nothing above the logo; with the refusal stubbed the two red lines centred above it, the iPhone /
 iPad words as an iPad.
+
+## Russian: the translators' corrected text.json and chapter title movie, 2026-11-25
+
+**Asked for:** Living FLCL sent two files to replace in the Russian ("We found a few bugs in the text, and it turns out the video wasn't
+re-encoded"): `ru/text.json` and `ru/movie/phasetitle_14_01.mp4`. The 2026-11-22 copies are kept in `ru-source/replaced-2026-11-25/`.
+**What their text.json changes:** the 5,120 lines they had left in Japanese are the port's English now; the marks are right (`@g`, `@t`,
+`@k`, no more Cyrillic letters standing for them); the game's sound marks are `[zap00]` / `[ber00]` again (they were shown as letters, as
+"эывс00Ю"); one typo (нанодит -> наноcит, its "c" a Latin letter); the line breaks of the Russian lines are gone (the port takes out the
+ones its rows made anyway: `reflow.js`); about 60 lines set flush right with new leading spaces. On screen, against the build of 2026-11-22:
+15,730 of the 15,816 lines that differ show the same; 12 edits; 4 lines lose a break the port kept (mid-sentence ones, three of them only
+kept by `reflow.js` DELIBERATE, which is the English's); three pages a row shorter.
+**Changed:** `build_ru.py` finds the untranslated scenes by `untranslated()`: a Japanese line, or the port's English line itself (no
+Cyrillic, words in Latin letters): the same 56 scenes in English and 493 in Russian (159 on their own scripts) as before, `ru/scripts`
+unchanged, and on the 2026-11-22 file the rule gave that day's text.json byte for byte (before FLUSH_RIGHT, which is measured for the new
+file and stops a build of the old one). `FLUSH_RIGHT`: 19 rows they set flush right with spaces (18 indents, and 23613's gap before its
+second part, @t, the two parts side by side) end under 8 px from the box's edge in the port's face (31490 past it: "Солнце уже / зашло." on
+two rows in Chromium), and WebKit sets rows a pixel or two wider, which broke 03_00_ARC03_5B's mirrored lines, 09_01_CIEL09_6,
+12_01_CIEL12_4B and 13_01_01_CIEL13_5B there: each line's longest run of spaces keeps one space less (10 px), nothing else changes; a line
+whose run is no longer at the measured count stops the build. The movie is AV1 now (it was H.264), with no sound track; nothing is lost: the game's own chapter titles
+and Russian's others carry a silent one (every sample 0, `ffmpeg astats`), so none was added. `lang.js` REVISED `movie/phasetitle_14_01.mp4` = 2 (30 days immutable). `build_langpacks.py ru`: the text's pack is
+`ru-d04bbd192f.pack` (`ru-63d82d85ab.pack` gone), `pack/index.json`; manifest and `assets.test.mjs` total. The fit page now loads the story's
+face before it measures (`fit.js`: Russian's came from its stylesheet, unloaded, so its pages were measured in the fallback face; the
+computed `font` shorthand is "" with Russian's font-kerning).
+**Checked:** page fit in Russian (Chromium, the face loaded) over all 15,818 pages, old and new text: max 11 rows, none over 12, choices
+and balloons the same, the three pages a row shorter the only change. The 46 pages of the lines that show differently, in WebKit
+(`webkit-snap`) and Chromium: the same rows in each but 6060 (07_00_ARC07_3_1_1), an ordinary paragraph whose row ends 0.8 px from the edge
+in Chromium and wraps a word sooner in WebKit, as it did with the old text. The game in Russian at 02_00_ARC02_6: the `[zap00]` line in the game's marks. The movie asked for at
+`/assets/ru/movie/phasetitle_14_01.mp4?v=2`, decoded and played in Chromium. Tests: 812, 809 pass, 3 skipped. No letter new to the face.

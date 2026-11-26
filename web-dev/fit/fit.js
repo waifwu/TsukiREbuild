@@ -70,6 +70,13 @@ const [lines, map] = await Promise.all([fetch(TEXT).then((r) => r.json()), fetch
 vm.lines = lines;
 for (const p of vm.scripts.values()) p.then((s) => { delete s.wrap; }).catch(() => {});   // wrapped against the English lines before
 await document.fonts.ready;
+// the story's face: the original's, or a language's own (Russian's, from its stylesheet), which fonts.ready alone does not wait for: without it a
+// Russian page was measured in the fallback face (2026-11-25). (Not the computed `font`: it is "" where the shorthand cannot say it all, as with
+// Russian's font-kerning.)
+{
+  const cs = getComputedStyle(document.getElementById("text"));
+  await document.fonts.load(`${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`).catch(() => null);
+}
 await Promise.all(['42px "Gelasio Bundled"', 'italic 42px "Gelasio Bundled"', '42px "SeuratPro"'].map((f) => document.fonts.load(f).catch(() => null)));
 
 const stage = document.getElementById("stage");

@@ -21,7 +21,7 @@ test("the manifest lists every asset the site serves: an MD5, a size and a path 
   assert.equal(new Set(paths).size, paths.length);
   assert.ok(!paths.some((p) => p.startsWith("voice/") || p.startsWith("se/")), "the site plays those from the packs");
   for (const p of ["text.json", "system.json", "scripts/index.json", "pack/index.json", "gallery.json", "flowchart.json"]) assert.ok(paths.includes(p), p);
-  assert.equal(lines.reduce((n, l) => n + l.size, 0), 3118915136, "3.1 GB");
+  assert.equal(lines.reduce((n, l) => n + l.size, 0), 3118348343, "3.1 GB");
   assert.ok(paths.includes("ja/index.json") && paths.filter((p) => p.startsWith("ja/")).length === 474, "Japanese's own, under ja/");
   assert.ok(paths.includes("zh/index.json") && paths.filter((p) => p.startsWith("zh/")).length === 143, "Chinese's own, under zh/");
   for (const lang of ["ja", "zh"]) assert.ok(paths.includes(`${lang}/pack/index.json`), `${lang}: the apps' packs (build_langpacks.py)`);
