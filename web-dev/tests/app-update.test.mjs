@@ -160,6 +160,14 @@ test("what the page asks of an app goes through one object: the desktop's promis
     assert.match(desktop, new RegExp(`\\n  ${name}: `), `desktop: ${name}`);
     assert.ok(read("web/app/js/apphost.js").includes(`//   ${name} `), `listed: ${name}`);
   }
+  // Discord Rich Presence is the desktop app's alone: the Android app has no such command.
+  assert.match(desktop, /\n  presence: /);
+  assert.ok(read("web/app/js/apphost.js").includes("//   presence "));
+  assert.doesNotMatch(java, /case "presence":/);
+  assert.doesNotMatch(java, /put\("presence"/, "the Android app's info says nothing of presence");
+  // the page makes it only when an app's info names it, and only then is the Desktop section on the Controls page (keyboard or touch)
+  assert.match(read("web/app/js/main.js"), /presenceAvailable = !!info\?\.presence;/);
+  assert.equal((read("web/app/js/ui.js").match(/const desktop = !!this\.env\.presenceAvailable\?\.\(\);/g) || []).length, 2);
 });
 
 test("in an app Export's file goes where the player chooses, Import has a file chooser, and a link opens in the system's browser", () => {
@@ -180,10 +188,10 @@ test("in an app Export's file goes where the player chooses, Import has a file c
   // a Save dialog taken down by the closing app answers as if Save had been pressed, with the name it opened on: nothing is written then
   // (2026-11-13: quitting the Mac app with the dialog up wrote over a savedata000 that was already in Downloads)
   assert.match(desktop, /if \(closing \|\| asked\.canceled \|\| !asked\.filePath \|\| !win \|\| win\.isDestroyed\(\)\) return \{ saved: false \};/);
-  assert.match(desktop, /app\.on\("before-quit", \(\) => \{ closing = true; \}\);/);
+  assert.match(desktop, /app\.on\("before-quit", \(\) => \{ closing = true; presence\?\.clear\(\{ force: true \}\); \}\);/);
   assert.match(desktop, /win\.on\("close", \(e\) => \{\n    closing = true;/);
   // the saves made on leaving are not made over an import that is about to be read (the file chooser takes the Android app to the background)
-  assert.match(read("web/app/js/main.js"), /globalThis\.appSuspend = \(\) => \{ if \(!savesReplaced\(\)\) \{ autosave\(\); vm\.saveRead\(\); vm\.unlocks\.save\(\); \} \};/);
+  assert.match(read("web/app/js/main.js"), /globalThis\.appSuspend = \(\) => \{ presence\?\.flush\(\); if \(!savesReplaced\(\)\) \{ autosave\(\); vm\.saveRead\(\); vm\.unlocks\.save\(\); \} \};/);
   // the stage cannot be scrolled, so nothing can shift the picture up and leave black under it (seen on a phone, 2026-11-13)
   assert.match(read("web/app/style.css"), /#stage \{[^}]*overflow: hidden; overflow: clip;/);
 });
@@ -793,7 +801,7 @@ test("the Android app's one permission is the internet, for its updates; the pag
   assert.match(desktop, /const net = \(\) => session\.fromPartition\("update"\);/, "the updates have a session of their own");
   assert.match(desktop, /if \(!event\.senderFrame \|\| !String\(event\.senderFrame\.url\)\.startsWith\(HOME\) \|\| !Object\.hasOwn\(host, name\)\) throw Error\("not available"\);/);
   // (the text feed, textfeed.js, is the app's, not the page's: it listens on the computer itself, and the page only hands it lines through `host`)
-  assert.deepEqual(JSON.parse(read("web-dev/desktop/package.json")).build.files, ["main.js", "preload.js", "updater.js", "textfeed.js", "package.json"]);
+  assert.deepEqual(JSON.parse(read("web-dev/desktop/package.json")).build.files, ["main.js", "preload.js", "updater.js", "textfeed.js", "discord.js", "package.json"]);
 });
 
 test("a deployment publishes what the apps update from, after every file it names", { skip: !existsSync(at("tools/cloudflare/deploy.py")) }, () => {

@@ -64,7 +64,7 @@ test("the game's first config is the port's own defaults", () => {
     skipConfirm: false, fastForward: "read", fadeUnread: true, fadeRead: true }, "main.js DEFAULTS");
   assert.deepEqual(volumes, { bgm: 0.4, se: 0.4, sys: 0.1, bgmMute: false, seMute: false, sysMute: false, chars: Array(19).fill(50), charOn: Array(19).fill(true) }, "audio.js VOLUME_DEFAULTS");
   const main = source("js/main.js");
-  assert.match(main, /const DEFAULTS = \{ textSpeed: 35, readSpeed: 15, autoPage: 3000, autoClick: 2200, skipRead: false, voiceOn: true, voiceStop: true,\n  wholeUnread: false, wholeRead: false, skipConfirm: false, fastForward: "read", fadeUnread: true, fadeRead: true \};/);
+  assert.match(main, /const DEFAULTS = \{ textSpeed: 35, readSpeed: 15, autoPage: 3000, autoClick: 2200, skipRead: false, voiceOn: true, voiceStop: true,\n  wholeUnread: false, wholeRead: false, skipConfirm: false, fastForward: "read", fadeUnread: true, fadeRead: true, discordPresence: false \};/);
 });
 
 test("a config written from the port's settings reads back the same; fields with no setting stay as the base has them", () => {
@@ -173,7 +173,7 @@ test("Import: the file's settings and progress over the browser's own, which are
   assert.equal(importedLabel(there), null);
   assert.equal(removeImported(there), false, "nothing loaded: nothing touched");
   assert.deepEqual(Object.fromEntries(there.map), { ...mine, ...rest, "tsuki.autosaves": "[{},{}]" });
-  assert.match(source("js/main.js"), /addEventListener\("pagehide", \(\) => \{ if \(!savesReplaced\(\)\) \{ autosave\(\); vm\.saveRead\(\); vm\.unlocks\.save\(\); \}/);
+  assert.match(source("js/main.js"), /addEventListener\("pagehide", \(\) => \{ presence\?\.suspend\(\); if \(!savesReplaced\(\)\) \{ autosave\(\); vm\.saveRead\(\); vm\.unlocks\.save\(\); \}/);
 });
 
 test("anything that is not the game's save file is refused, with a line for the player", () => {

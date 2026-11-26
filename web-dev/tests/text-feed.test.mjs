@@ -243,7 +243,7 @@ test("the desktop app starts the feed and the clipboard writer when ready, tells
   assert.match(main, /\n  info: async \(\) => \{ await feedStarted; return \{ [^\n]*text: feedInfo\(\) \}; \},/);
   assert.match(main, /\n  text: \(\{ line \}\) => \{ const s = typeof line === "string" \? line : ""; feed\?\.send\(s\); clip\?\.send\(s\); return \{\}; \},/);
   assert.match(main, /app\.whenReady\(\)\.then\(\(\) => \{\n    loadUpdater\(\);\n    feed = new TextFeed\(\{ port: TEXT_PORT \}\);\n    feedStarted = feed\.start\(\)\.catch\(\(\) => false\);[^\n]*\n    clip = new ClipboardFeed\(\{ mode: CLIPBOARD, write: TEST_DIR \? [^\n]* : \(t\) => clipboard\.writeText\(t\) \}\);/);
-  assert.match(main, /app\.on\("will-quit", \(\) => \{ feed\?\.close\(\); clip\?\.close\(\); \}\);/);
+  assert.match(main, /app\.on\("will-quit", \(\) => \{ feed\?\.close\(\); clip\?\.close\(\); presence\?\.close\(\); presence = null; \}\);/);
   // nothing is sent to LunaTranslator's network service any more (its /api/textinput brought its window forward each line, and crashed it)
   assert.ok(!/api\/textinput|LunaFeed|luna-port/.test(main + read("web-dev/desktop/textfeed.js").replace(/^\/\/.*$/gm, "")));
   // listening on this computer only
@@ -263,7 +263,7 @@ test("the desktop app starts the feed and the clipboard writer when ready, tells
 test("the page sends a line only when the app's info names a feed, and none of a run that passes everything at once", () => {
   const page = read("web/app/js/main.js");
   assert.match(page, /import \{ HOST \} from "\.\/apphost\.js";/);
-  assert.match(page, /HOST\?\.call\("info"\)\.then\(\(info\) => \{\n  if \(info\?\.text\) text\.onLine = \(line\) => \{ if \(!vm\.fast\) HOST\.call\("text", \{ line \}\)\.catch\(\(\) => \{\}\); \};\n\}\)\.catch\(\(\) => \{\}\);/);
+  assert.match(page, /HOST\?\.call\("info"\)\.then\(\(info\) => \{\n  if \(info\?\.text\) text\.onLine = \(line\) => \{ if \(!vm\.fast\) HOST\.call\("text", \{ line \}\)\.catch\(\(\) => \{\}\); \};\n  presenceAvailable = !!info\?\.presence;\n  if \(presenceAvailable\) \{\n    presence = createPresence\(\{ vm \}\);\n    presence\.setEnabled\(!!settings\.discordPresence\);\n  \}\n\}\)\.catch\(\(\) => \{\}\);/);
   const host = read("web/app/js/apphost.js");
   assert.ok(host.includes("//   text         { line }"));
   // the Android app has no feed: `text` is the desktop's alone, and the page never asks it of an app whose info does not name one

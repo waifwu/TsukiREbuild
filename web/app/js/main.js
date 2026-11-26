@@ -18,6 +18,7 @@ import { mediaLine, soundPlays } from "./formats.js";
 import { tr } from "./sitewords.js";
 import { LANG, ORIG, RU } from "./lang.js";
 import { HOST } from "./apphost.js";
+import { createPresence } from "./presence.js";
 import { savesReplaced } from "./savefile.js";
 import { Preloader, RANK, movieUrl, fontsFor } from "./preload.js";
 import { subsFor, showSubs } from "./subs.js";
@@ -125,9 +126,11 @@ function popup(kind) {
 // and no confirmation for it (+0x60 = 0), fast forward "Read" (+0x1e = 1: 0x40ed0 and 0x77790 stop it at unread
 // text), letters fading in and earlier lines fading out (+0x61 = +0x62 = 0).
 const DEFAULTS = { textSpeed: 35, readSpeed: 15, autoPage: 3000, autoClick: 2200, skipRead: false, voiceOn: true, voiceStop: true,
-  wholeUnread: false, wholeRead: false, skipConfirm: false, fastForward: "read", fadeUnread: true, fadeRead: true };
+  wholeUnread: false, wholeRead: false, skipConfirm: false, fastForward: "read", fadeUnread: true, fadeRead: true, discordPresence: false };
 let settings = { ...DEFAULTS };
 try { Object.assign(settings, JSON.parse(localStorage.getItem("tsuki.settings") || "{}")); } catch { /* defaults */ }
+// Discord Rich Presence (presence.js), made once the desktop app's info says it is there (below).
+let presence = null, presenceAvailable = false;
 function setSetting(k, v) {
   settings[k] = v;
   try { localStorage.setItem("tsuki.settings", JSON.stringify(settings)); } catch { /* not saved */ }
@@ -146,6 +149,7 @@ function setSetting(k, v) {
   vm.voiceOn = settings.voiceOn;
   vm.voiceStop = settings.voiceStop;
   audio.setVoiceSwitch(settings.voiceOn);   // voiced effects playing follow the switch (0x9b7f0, type-2 channels)
+  presence?.setEnabled(!!settings.discordPresence);
 }
 
 // The marks' cell counter (0x572b60) is one for all of them: 0x38ec0 adds the frames while a mark is drawn and takes
@@ -386,8 +390,15 @@ vm.useFrameTime();         // and the story's clocks with them, a whole frame at
 // The desktop app passes the story's lines on to text-extraction tools such as texthooker-ui (web-dev/desktop/textfeed.js), when its info
 // names a feed: each line as it is shown, fast forward included, but none of a run that passes everything at once without showing it (a
 // read scene's instant run, a load's restore: vm.fast). Nothing changes on the site, in the Android app or in an older desktop app.
+// Its info also says whether it can show Discord Rich Presence (presence.js): the switch on Config -> Controls -> Desktop is
+// there only then, and the page keeps the play time for it even while the switch is off.
 HOST?.call("info").then((info) => {
   if (info?.text) text.onLine = (line) => { if (!vm.fast) HOST.call("text", { line }).catch(() => {}); };
+  presenceAvailable = !!info?.presence;
+  if (presenceAvailable) {
+    presence = createPresence({ vm });
+    presence.setEnabled(!!settings.discordPresence);
+  }
 }).catch(() => {});
 // What is read before it is asked for (preload.js): the start-up list from the first page on, and what the script is coming to.
 const preload = new Preloader({ vm, gfx, audio });
@@ -516,6 +527,7 @@ function gameFrames(dt) {
 async function frame(real) {
   const dt = lastFrame === null ? 0 : Math.min(30, ((real - lastFrame) * 60) / 1000);
   lastFrame = real;
+  presence?.tick();
   syncFastForward();
   $("mode-skip").classList.toggle("paused", !!vm.skipPaused);   // state 5: skipping stopped at unread text (0x41944)
   vm.voiceHeldCut();   // the fast-forward key held cuts the line's voice each frame (0x802c0, N2-81)
@@ -563,6 +575,7 @@ touch.resumed = () => { lastFrame = null; };
 document.addEventListener("visibilitychange", () => {
   vm.holdClocks("hidden", document.hidden);
   lastFrame = null;   // no catching up on the time the page was hidden
+  presence?.visibility(document.hidden);
   if (document.hidden) { globalThis.appSuspend(); audio.trim(0); gfx.release(); }
   else gfx.invalidate?.();   // back in sight: the next frame is drawn whatever it shows (the canvas may not have kept it)
   if (document.hidden && appleTouch()) audio.stale = true;   // the first press back makes the sound again (audio.renew)
@@ -573,12 +586,12 @@ document.addEventListener("visibilitychange", () => {
 // Leaving the page while a story runs counts as leaving the story: the automatic save is made, as native makes it on
 // returning to the title (0x4cea0 -> 0x52aa0).
 // (Not after an import, home.js: the page is loading again to read the file's saves, and what it holds of the old ones must not be written over them.)
-addEventListener("pagehide", () => { if (!savesReplaced()) { autosave(); vm.saveRead(); vm.unlocks.save(); } if (audio.ctx) audio.ctx.close(); });
+addEventListener("pagehide", () => { presence?.suspend(); if (!savesReplaced()) { autosave(); vm.saveRead(); vm.unlocks.save(); } if (audio.ctx) audio.ctx.close(); });
 // The Android app (web-dev/android) calls this when it goes to the background, where Android may end it without a
 // pagehide, and the desktop app (web-dev/desktop) when its window closes: the same saves, with the sound left open for
 // coming back. Nothing on the web calls it. (Not after an import, as above: choosing the file takes the Android app to
 // the background and back.)
-globalThis.appSuspend = () => { if (!savesReplaced()) { autosave(); vm.saveRead(); vm.unlocks.save(); } };
+globalThis.appSuspend = () => { presence?.flush(); if (!savesReplaced()) { autosave(); vm.saveRead(); vm.unlocks.save(); } };
 
 // Ordinary skipping passes only text already read; a forced skip passes everything up to the next choice.
 // The skip toggle is bit 1 of 0xae0660 (vm.skipToggle): an instant run takes the flags over until it ends (N2-208), and then what it gives back is what this sets.
@@ -977,7 +990,7 @@ pad.onModeChange = (active) => {
 ui.touch = touch.on ? touch : null;   // the screens ask it for their touch layouts
 ui.env = {
   newGame, startStory, firstLaunch: () => firstLaunch, loadSave, makeSave, toTitle, flowchart, gallery, toast, settings, titleVideo, titleHold, titleMusic,
-  setSetting, autosaves, preloadGallery,
+  setSetting, autosaves, preloadGallery, presenceAvailable: () => presenceAvailable,
   resetSettings: () => { settings = { ...DEFAULTS }; ui.env.settings = settings; for (const [k, v] of Object.entries(settings)) setSetting(k, v); audio.resetVolumes(); keys.reset(); pad.config.reset(); ui.refreshHints?.(); },
   toggleAuto, toggleSkip, rewind,
   // the quick bar's own (ui.buildPanel): the log, hiding the text, full screen, and the system menu (row: opened on Save 0, Load 1 or Config 2)

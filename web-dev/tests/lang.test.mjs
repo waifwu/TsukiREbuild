@@ -413,12 +413,14 @@ test("the Controls page has a Chinese word for each of its own words, and keeps 
   const { ACTIONS, MENU_KEYS, MOUSE, keyLabel } = await import("../../web/app/js/keys.js");
   const { TOUCH_CONTROLS } = await import("../../web/app/js/touch.js");
   const words = ["Keyboard", "Click a key to change it.  Esc cancels, Backspace clears.", "Menus", "Mouse", "Touch", "Press a key", "key", "Space",
+    "Desktop", "Discord Rich Presence", "On", "Off",
     ...ACTIONS.map((a) => a.label), ...MENU_KEYS.map(([l]) => l), ...MOUSE.flat(), ...TOUCH_CONTROLS.flat()];
   for (const w of words) assert.ok(CONTROLS_ZH[w] && /[一-鿿]/.test(CONTROLS_ZH[w]), w);
   assert.equal(say("Advance text"), "Advance text", "English here (the tests run in English)");
   assert.equal(say(keyLabel("Space")), "Space");
   const ui = readFileSync(new URL("../../web/app/js/ui.js", import.meta.url), "utf8");
-  for (const s of ['head(say("Keyboard")', 'line(say(a.label)', 'cap(say(what)', 'say(keyLabel(k))', 'say("Press a key")', 'say(how)', 'say("Touch")'])
+  for (const s of ['head(say("Keyboard")', 'line(say(a.label)', 'cap(say(what)', 'say(keyLabel(k))', 'say("Press a key")', 'say(how)', 'say("Touch")',
+    'say("Desktop")', 'say("Discord Rich Presence")', 'say(on ? "On" : "Off")'])
     assert.ok(ui.includes(s), s);
 });
 

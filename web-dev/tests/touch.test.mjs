@@ -352,7 +352,7 @@ test("the gallery's music player moves its track with the sound", async () => {
 test("the page going out of sight saves as pagehide does and lets the idle decoded sounds go", () => {
   const main = source("js/main.js");
   assert.match(main, /if \(document\.hidden\) \{ globalThis\.appSuspend\(\); audio\.trim\(0\); gfx\.release\(\); \}/);
-  assert.match(main, /globalThis\.appSuspend = \(\) => \{ if \(!savesReplaced\(\)\) \{ autosave\(\); vm\.saveRead\(\); vm\.unlocks\.save\(\); \} \};/);
+  assert.match(main, /globalThis\.appSuspend = \(\) => \{ presence\?\.flush\(\); if \(!savesReplaced\(\)\) \{ autosave\(\); vm\.saveRead\(\); vm\.unlocks\.save\(\); \} \};/);
   // on an iPhone or an iPad the sound is marked stale as the page hides, and made again at the first press back, not under the rotate screen
   assert.match(main, /if \(document\.hidden && appleTouch\(\)\) audio\.stale = true;/);
   assert.match(main, /addEventListener\("pointerdown", \(\) => \{ if \(audio\.stale && !touch\.held && !document\.hidden\) audio\.renew\(\); audio\.start\(\); \}, true\);/);

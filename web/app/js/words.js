@@ -77,6 +77,11 @@ export const CONTROLS_ZH = {
   "Auto": "自动",
   "South (A / \u2715)": "下键（A / \u2715）",
   "East (A / \u25cb)": "右键（A / \u25cb）",
+  // the desktop app's section
+  "Desktop": "桌面",
+  "Discord Rich Presence": "Discord 动态",
+  "On": "开",
+  "Off": "关",
 };
 
 // The Controls page's words in the language in use: Chinese where the table has them, else the English as it is.

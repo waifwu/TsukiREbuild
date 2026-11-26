@@ -6,7 +6,7 @@
 // where none of it is needed. (The Android app is in landscape throughout, so its opening page is never the upright one.)
 //
 // Both apps answer the same commands (MainActivity.java `invoke`, desktop/main.js `host`), each with one object of arguments:
-//   info         {}                              -> { kind, shell, version, update: { current: { id, time, version, assets, files } | null, rejected: [id] } }
+//   info         {}                              -> { kind, shell, version, update: { current: { id, time, version, assets, files } | null, rejected: [id] }, presence? }
 //   open         { url }                         a web page, in the system's browser
 //   saveFile     { name, data }                  data in base64; -> { saved, name } once the player has chosen a place, or closed the question
 //   fetchText    { path, hash }                  a text file of the site's, checked against `hash` when one is given
@@ -14,8 +14,10 @@
 //   cancel       {}                              stops that
 //   apply        { id, meta }                    switches to update `id`: the page then loads itself again, and is served the new files
 //   confirm      {}                              the page has come up: the update it runs is kept
-// and the desktop app alone (its info then has text: { port, clipboard }, the WebSocket's port and the clipboard's mode; null when it has neither):
+// and the desktop app alone (its info then has presence: true, and text: { port, clipboard }, the WebSocket's port and the clipboard's
+// mode; null when it has neither):
 //   text         { line }                        a line the story shows, for text-extraction tools on the computer (desktop/textfeed.js)
+//   presence     { activity, force }             what Discord shows: { details, state, start, assets } (presence.js), or null to clear (desktop/discord.js)
 export const APP_HOSTS = { "appassets.androidplatform.net": "android", "tsukihime.desktop": "desktop" };
 export const appKind = (host = globalThis.location?.hostname || "") => APP_HOSTS[host] || null;
 export const APP = appKind();
