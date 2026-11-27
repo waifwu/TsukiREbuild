@@ -134,6 +134,28 @@ test("desktop presence: the pipes are tried in order; a silent one is left, and 
   presence.close();
 });
 
+test("desktop presence: a pipe that refuses before READY is left, and the next pipe still gets the wish", async () => {
+  const time = clock(), sockets = [], log = [];
+  const presence = new DiscordPresence({
+    now: time.now, setTimeout: time.setTimeout, clearTimeout: time.clearTimeout,
+    connect: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    paths: () => ["one", "two"], randomUUID: () => "nonce", log: (message) => log.push(message),
+    handshakeMs: 1000, writeMs: 5000,
+  });
+  presence.setActivity(wish());
+  const first = sockets[0];
+  first.connect();
+  first.send(OP.FRAME, { evt: "ERROR", data: { code: 4000, message: "Invalid Client ID" } });
+  await settle();
+  assert.notEqual(presence.desired, null, "a refusal before READY says nothing about the wish");
+  assert.equal(first.destroyed, true);
+  assert.equal(sockets.length, 2, "the search goes on to the next pipe");
+  await ready(sockets[1]);
+  assert.equal(sockets[1].commands()[0].args.activity.details, "Common Route", "the second pipe gets the wish");
+  assert.deepEqual(log, ["Invalid Client ID"], "logged once");
+  presence.close();
+});
+
 test("desktop presence: handshake, READY, one set for the same words, and a changed day sent", async () => {
   const time = clock(), sockets = [], log = [];
   const presence = makePresence(time, sockets, log);
@@ -208,6 +230,31 @@ test("desktop presence: a clear waits for the set already in flight, then goes a
   presence.close();
 });
 
+test("desktop presence: a rate-limited clear waits for the pause too, instead of going again at once", async () => {
+  const time = clock(), sockets = [], log = [];
+  const presence = makePresence(time, sockets, log);
+  presence.setActivity(wish());
+  const socket = sockets[0];
+  await ready(socket);
+  await ack(socket, socket.commands()[0]);
+  presence.clear();
+  await settle();
+  assert.equal(socket.commands().length, 2, "the clear skips the window");
+  assert.equal(socket.commands()[1].args.activity, null);
+  socket.send(OP.FRAME, { evt: "ERROR", data: { code: 5010, message: "You are being rate limited" } });
+  await settle();
+  assert.equal(socket.commands().length, 2, "a refused clear is not sent again at once");
+  time.advance(19999);
+  await settle();
+  assert.equal(socket.commands().length, 2, "still waiting");
+  time.advance(1);
+  await settle();
+  assert.equal(socket.commands().length, 3, "the same clear is tried once after 20 s");
+  assert.equal(socket.commands()[2].args.activity, null);
+  assert.deepEqual(log, ["You are being rate limited"], "logged once");
+  presence.close();
+});
+
 test("desktop presence: a lost pipe keeps the wish and reconnects with the same timer start", async () => {
   const time = clock(), sockets = [];
   const presence = makePresence(time, sockets);
@@ -231,14 +278,35 @@ test("desktop presence: a lost pipe keeps the wish and reconnects with the same 
   presence.close();
 });
 
-test("desktop presence: Discord's rate limit keeps the wish and retries after 20 s; another error forgets it", async () => {
+test("desktop presence: a close frame's 4002 is the rate limit and holds the reconnect back", async () => {
+  const time = clock(), sockets = [];
+  const presence = makePresence(time, sockets);
+  presence.setActivity(wish());
+  const first = sockets[0];
+  await ready(first);
+  await ack(first, first.commands()[0]);
+  first.send(OP.CLOSE, { code: 4002, message: "You are being rate limited" });
+  await settle();
+  time.advance(5000);
+  await settle();
+  assert.equal(sockets.length, 1, "the usual first backoff is not enough");
+  time.advance(14999);
+  await settle();
+  assert.equal(sockets.length, 1, "still waiting");
+  time.advance(1);
+  await settle();
+  assert.equal(sockets.length, 2, "the next pipe is tried after 20 s");
+  presence.close();
+});
+
+test("desktop presence: Discord's rate limit (5010) keeps the wish and retries after 20 s; an invalid command is forgotten", async () => {
   const time = clock(), sockets = [], log = [];
   const presence = makePresence(time, sockets, log);
   presence.setActivity(wish());
   const socket = sockets[0];
   await ready(socket);
   assert.equal(socket.commands().length, 1);
-  socket.send(OP.FRAME, { evt: "ERROR", data: { code: 4002, message: "You are being rate limited" } });
+  socket.send(OP.FRAME, { evt: "ERROR", data: { code: 5010, message: "You are being rate limited" } });
   await settle();
   time.advance(19999);
   await settle();
@@ -254,27 +322,35 @@ test("desktop presence: Discord's rate limit keeps the wish and retries after 20
   other.setActivity(wish());
   const pipe = otherSockets[0];
   await ready(pipe);
-  pipe.send(OP.FRAME, { evt: "ERROR", data: { code: 4000, message: "Invalid Client ID" } });
+  // ERROR 4002 is an invalid command (a close frame's 4002 is the rate limit): it must not be retried.
+  pipe.send(OP.FRAME, { evt: "ERROR", data: { code: 4002, message: "Invalid command" } });
   await settle();
   assert.equal(other.desired, null, "a refused command is not tried forever");
-  assert.deepEqual(otherLog, ["Invalid Client ID"]);
+  otherTime.advance(20000);
+  await settle();
+  assert.equal(pipe.commands().length, 1, "an invalid command is not sent again");
+  assert.deepEqual(otherLog, ["Invalid command"]);
   other.close();
 });
 
 test("presence route and day: prologue, common until the day-3 split, then the script's own route", () => {
-  const split = 12;
+  const split = 70;   // 03_00_ARC03_5B's place in the script list, which is sorted by name
   assert.equal(routeOf("00_01", 2, split), PROLOGUE);
   assert.equal(routeOf("03_00_ARC03_5B", split, split), COMMON, "the split itself is common");
-  assert.equal(routeOf("04_00_ARC04_1", split + 1, split), ARCUEID);
-  assert.equal(routeOf("05_01_CIEL05_2_2_2", split + 30, split), CIEL);
-  assert.equal(routeOf("QA00_01", split + 60, split), SENSEI);
+  // Ciel's day-3 scenes sort after the split, but are played before the route is chosen: no spoiler yet.
+  assert.equal(routeOf("03_01_CIEL03_1", 73, split), COMMON);
+  assert.equal(routeOf("03_01_CIEL03_2_1", 74, split), COMMON);
+  assert.equal(routeOf("03_01_CIEL03_2_3", 75, split), COMMON);
+  assert.equal(routeOf("04_00_ARC04_1", 76, split), ARCUEID);
+  assert.equal(routeOf("05_01_CIEL05_2_2_2", 130, split), CIEL);
+  assert.equal(routeOf("QA00_01", 300, split), SENSEI);
   assert.equal(dayOf("04_00_ARC04_1"), 4);
   assert.equal(dayOf("QA00_01"), null);
   const prologue = activityFor("00_01", 2, split, 0, 1_700_000_000_000);
   assert.equal(prologue.details, PROLOGUE);
   assert.equal(prologue.state, undefined, "no day in the prologue");
   assert.equal(prologue.assets.small_image, undefined);
-  const arc = activityFor("04_00_ARC04_1", split + 1, split, 3_600_000, 1_700_000_000_000);
+  const arc = activityFor("04_00_ARC04_1", 76, split, 3_600_000, 1_700_000_000_000);
   assert.equal(arc.state, "Day 4");
   assert.equal(arc.assets.small_image, "route_arc");
   assert.equal(arc.start, 1_699_996_400, "the start of the whole play time");
@@ -285,8 +361,8 @@ test("presence play time: story and visible only, menus included, saved every fl
   const storage = store();
   let time = 1_000_000;
   const sent = [];
-  const vm = { running: true, replay: false, script: { name: "04_00_ARC04_1" }, scriptIndex: 13, index: { names: Array(20).fill("x") } };
-  vm.index.names[12] = "03_00_ARC03_5B";
+  const vm = { running: true, replay: false, script: { name: "04_00_ARC04_1" }, scriptIndex: 76, index: { names: Array(140).fill("x") } };
+  vm.index.names[70] = "03_00_ARC03_5B";
   let hidden = false;
   const presence = createPresence({
     vm, now: () => time, storage, hidden: () => hidden, flushMs: 100,

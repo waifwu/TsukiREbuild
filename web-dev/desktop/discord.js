@@ -7,11 +7,13 @@
 //
 // The rules this file keeps:
 //   - The first SET_ACTIVITY waits for Discord's READY. A reconnect sends the last wish again, with the same start time.
-//   - Four writes in a sliding 20 s window, at least a second apart. A clear is never delayed (but counts in the window).
-//     The latest wish is the one sent; a wish already on screen is not sent again (its timer would restart).
+//   - Four writes in a sliding 20 s window, at least a second apart. A clear skips that window and floor (but counts in
+//     the window), and still waits for Discord's own rate-limit pause. The latest wish is the one sent; a wish already
+//     on screen is not sent again (its timer would restart).
 //   - A clear waits only for the write already under way, then goes at once: a late set never lands after a hide.
-//   - A transport error keeps the wish and reconnects; Discord's rate limit keeps it too and waits 20 s; any other
-//     ERROR drops it. Each distinct message is logged once.
+//   - A transport error keeps the wish and reconnects; Discord's rate limit (ERROR 5010) keeps it too and waits 20 s;
+//     any other ERROR drops it. An ERROR before READY only leaves that pipe: the search goes on, and the wish stays.
+//     Each distinct message is logged once.
 //   - If Discord is not running, the game does not notice: the pipe is looked for again later, quietly.
 "use strict";
 
@@ -169,8 +171,13 @@ class Connection {
         return;
       }
       if (value?.evt === "ERROR") {
-        this.presence.handleError(value.data || value);
-        this.fail(new Error(value?.data?.message || "Discord refused the connection"));
+        // Before READY this pipe is only being tried: a refusal says nothing about the wish. Leave this pipe and let
+        // the search try the next one; the message is still worth one line.
+        const data = value.data || value;
+        const message = String(data?.message || data?.error || "Discord refused the connection");
+        this.presence.logOnce(message);
+        if (this.presence.isRateLimit(data)) this.presence.noteRateLimit();
+        this.fail(new Error(message));
       }
       return;
     }
@@ -359,7 +366,7 @@ class DiscordPresence {
     const message = String(data?.message || data?.error || "Discord error");
     this.logOnce(message);
     if (this.writing) { this.clearTimeout(this.writing.timer); this.writing = null; }
-    if (this.isRateLimit(data, message)) {
+    if (this.isRateLimit(data)) {
       // The wish stays; after the pause the same write is tried again (and a clear is still a clear).
       this.ratePauseUntil = this.now() + this.ratePauseMs;
       this.pump();
@@ -373,8 +380,10 @@ class DiscordPresence {
     this.resolveClear();
   }
 
-  isRateLimit(data, message) {
-    return Number(data?.code) === 4002 || /rate.?limit|too many/i.test(message);
+  // Discord's ERROR code for a rate limit is 5010. (ERROR 4002 is an invalid command; only a close frame's 4002 means
+  // rate limited, and Connection handles that one before this is reached.)
+  isRateLimit(data) {
+    return Number(data?.code) === 5010;
   }
 
   noteRateLimit() { this.ratePauseUntil = this.now() + this.ratePauseMs; }
@@ -385,7 +394,8 @@ class DiscordPresence {
     try { this.log(message); } catch { /* a logger that throws is no reason to stop */ }
   }
 
-  // The wait the next set must make: four writes in 20 s, a second between two, and Discord's own pause. A clear skips it.
+  // The wait the next set must make: four writes in 20 s, a second between two, and Discord's own pause. A clear skips
+  // the window and floor (pump checks the pause for it).
   sendWait() {
     if (this.burstLeft > 0) return 0;
     const now = this.now();
@@ -401,6 +411,9 @@ class DiscordPresence {
     if (this.closed || !this.ready || this.writing) return;
     if (!this.desired) {
       if (!this.displayed && !this.forceClear) { this.resolveClear(); return; }
+      // A clear skips the window and the floor, but Discord's own rate-limit pause is not ours to ignore.
+      const wait = Math.max(0, this.ratePauseUntil - this.now());
+      if (wait > 0) { this.armPump(wait); return; }
       this.send(null);
       return;
     }

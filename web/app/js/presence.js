@@ -14,6 +14,8 @@ const STORE = "tsuki.playtime";
 const FLUSH_MS = 15000;
 const SPLIT = "03_00_ARC03_5B";                  // the day-3 scene after which the route is Arcueid's or Ciel's
 const SENSEI = "Ciel-sensei's Corner";
+// Ciel's day-3 scenes that sort (and so are indexed) after the split but are played before the route is chosen.
+const PRE_SPLIT_CIEL = new Set(["03_01_CIEL03_1", "03_01_CIEL03_2_1", "03_01_CIEL03_2_3"]);
 
 export const PROLOGUE = "Prologue";
 export const COMMON = "Common Route";
@@ -40,6 +42,7 @@ export function routeOf(name, index = 0, split = -1) {
     const day = dayOf(name);
     if (day === null || day <= 3) return COMMON;
   }
+  if (PRE_SPLIT_CIEL.has(name)) return COMMON;
   if (name.includes("CIEL")) return CIEL;
   if (name.includes("ARC")) return ARCUEID;
   return COMMON;
