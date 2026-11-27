@@ -13,7 +13,7 @@
 //   - A clear waits only for the write already under way, then goes at once: a late set never lands after a hide.
 //   - A transport error keeps the wish and reconnects; Discord's rate limit (ERROR 5010) keeps it too and waits 20 s;
 //     any other ERROR drops it. An ERROR before READY only leaves that pipe: the search goes on, and the wish stays.
-//     Each distinct message is logged once.
+//     Each distinct message is logged once, with its code (a burst run also logs every reply Discord sends).
 //   - If Discord is not running, the game does not notice: the pipe is looked for again later, quietly.
 "use strict";
 
@@ -100,6 +100,15 @@ function frame(op, value) {
   return out;
 }
 
+// A Discord error or close as one line, with its code when it has one: 5010 is an ERROR's rate limit, 4002 a close
+// frame's; an ERROR's 4002 is an invalid command.
+function describeError(data, fallback) {
+  const code = data?.code;
+  const message = String(data?.message || data?.error || "");
+  const head = code != null && code !== "" ? `${fallback} (${code})` : fallback;
+  return message ? `${head}: ${message}` : head;
+}
+
 // Every complete frame in a buffer plus a new chunk, and what is left of a frame still coming.
 function readFrames(buffer, chunk) {
   let data = buffer?.length ? Buffer.concat([buffer, chunk]) : chunk;
@@ -151,9 +160,11 @@ class Connection {
     const { frames, rest } = readFrames(this.reader, chunk);
     this.reader = rest;
     for (const [op, value] of frames) {
+      this.presence.logResponse(op, value);
       if (op === OP.PING) { this.write(OP.PONG, value ?? {}); continue; }
       if (op === OP.CLOSE) {
         if (value?.code === 4002) this.presence.noteRateLimit();
+        this.presence.logOnce(describeError(value, "Discord closed the pipe"));
         this.fail(new Error(value?.message || "Discord closed the pipe"));
         return;
       }
@@ -174,7 +185,7 @@ class Connection {
         // Before READY this pipe is only being tried: a refusal says nothing about the wish. Leave this pipe and let
         // the search try the next one; the message is still worth one line.
         const data = value.data || value;
-        const message = String(data?.message || data?.error || "Discord refused the connection");
+        const message = describeError(data, "Discord refused the connection");
         this.presence.logOnce(message);
         if (this.presence.isRateLimit(data)) this.presence.noteRateLimit();
         this.fail(new Error(message));
@@ -200,7 +211,7 @@ class DiscordPresence {
     clientId = CLIENT_ID, pid = process.pid, connect = (target) => net.connect(target), paths = () => pipePaths(),
     now = Date.now, setTimeout = globalThis.setTimeout, clearTimeout = globalThis.clearTimeout, randomUUID = newUUID,
     log = (message) => console.error(message), handshakeMs = HANDSHAKE_MS, writeMs = WRITE_MS, ratePauseMs = RATE_PAUSE_MS,
-    rate = RATE, backoff = BACKOFF, burst = 0,
+    rate = RATE, backoff = BACKOFF, burst = 0, trace = false,
   } = {}) {
     this.clientId = clientId || CLIENT_ID;
     this.pid = pid;
@@ -217,16 +228,18 @@ class DiscordPresence {
     this.rate = { ...RATE, ...rate };
     this.backoff = backoff;
     this.burst = Math.max(0, Number(burst) || 0);
+    this.trace = !!trace;
 
     this.conn = null;
     this.desired = null;            // the wish, as sanitizeActivity made it
     this.ready = false;
     this.connecting = false;
     this.closed = false;
-    this.displayed = false;         // this connection has a set activity on the profile
-    this.lastSentKey = null;        // what that activity was (activityKey)
+    this.displayed = false;         // an activity may be on the profile (kept across a lost pipe until a clear is written)
+    this.lastSentKey = null;        // what this connection last set (activityKey)
     this.lastSentStart = null;      // and the timer start it was given
-    this.forceClear = false;
+    this.clearWanted = false;       // a clear still has to reach Discord
+    this.forceClear = false;        // send a clear even when no activity is known to be shown
     this.writing = null;
     this.sentAt = [];               // when writes went out, for the sliding window
     this.pumpTimer = null;
@@ -242,11 +255,15 @@ class DiscordPresence {
     const wish = sanitizeActivity(activity);
     if (!wish) return this.clear();
     const key = activityKey(wish);
-    const shown = this.displayed && key === this.lastSentKey;
+    const same = this.displayed && key === this.lastSentKey;
+    // A clear under way (or waiting) means the same words are not on the profile for long: they must go again.
+    const clearing = this.clearWanted || (!!this.writing && !this.writing.activity);
+    const shown = same && !clearing;
     // The same words are already on the profile: keep the start we sent, not the one this copy carries. (A wish that
     // comes back to them replaces whatever was still waiting: the latest wish is the one that goes.)
-    if (shown && Number.isSafeInteger(this.lastSentStart)) wish.timestamps.start = this.lastSentStart;
+    if (same && Number.isSafeInteger(this.lastSentStart)) wish.timestamps.start = this.lastSentStart;
     this.desired = wish;
+    this.clearWanted = false;
     this.forceClear = false;
     this.cancelPump();
     this.resolveClear();   // a clear this wish replaces has nothing left to write
@@ -259,33 +276,44 @@ class DiscordPresence {
   // Clear the profile. force: send even if nothing is known to be shown (leaving the game, turning the switch off).
   // The promise is done when the clear is written (or there is nothing to write); a quit can wait on it.
   clear({ force = false } = {}) {
+    // A set still waiting for its answer, or an activity on the profile, may be there still: the clear is owed even
+    // if this pipe is already gone, and a later reconnect writes it.
+    const shown = this.displayed || !!this.writing || this.clearWanted;
     this.desired = null;
     this.lastSentKey = null;
     this.lastSentStart = null;
     this.forceClear = !!force;
+    this.clearWanted = !!force || shown;
     this.cancelPump();
     if (this.retryTimer) { this.clearTimeout(this.retryTimer); this.retryTimer = null; }
     const done = new Promise((resolve) => this.clearWaiters.push(resolve));
-    // A set still waiting for its answer may put something on the profile: the clear waits for it, then goes.
-    if (this.closed || !this.ready || (!this.displayed && !this.forceClear && !this.writing)) { this.resolveClear(); return done; }
+    if (this.closed) { this.clearWanted = false; this.resolveClear(); return done; }
+    if (!this.ready) {
+      if (this.clearWanted) this.ensureConnection();
+      else this.resolveClear();
+      return done;
+    }
     this.pump();
     return done;
   }
 
+  // Something still has to be written: the wish, or a clear.
+  hasWork() { return !!this.desired || this.clearWanted; }
+
   // The wish may have been cleared before the pipe was up: nothing to connect for.
   ensureConnection() {
-    if (this.closed || this.ready || this.connecting || this.retryTimer || !this.desired) return;
+    if (this.closed || this.ready || this.connecting || this.retryTimer || !this.hasWork()) return;
     this.connecting = true;
     this.scan().catch((error) => this.logOnce(error?.message || String(error))).finally(() => { this.connecting = false; });
   }
 
   async scan() {
     for (const target of this.paths()) {
-      if (this.closed || !this.desired) return;
+      if (this.closed || !this.hasWork()) return;
       const conn = await this.tryPath(target);
       if (conn) { this.adopt(conn); return; }
     }
-    if (!this.closed && this.desired) this.scheduleReconnect();
+    if (!this.closed && this.hasWork()) this.scheduleReconnect();
   }
 
   tryPath(target) {
@@ -301,18 +329,18 @@ class DiscordPresence {
   }
 
   adopt(conn) {
-    if (this.closed || conn.closed) { if (!this.closed && this.desired) this.scheduleReconnect(); return; }
+    if (this.closed || conn.closed) { if (!this.closed && this.hasWork()) this.scheduleReconnect(); return; }
     this.conn = conn;
     this.ready = true;
     this.connecting = false;
-    this.displayed = false;
+    // displayed stays as it was: the profile may still hold what the lost pipe set, until a clear is written.
     this.lastSentKey = null;
     this.lastSentStart = null;
     this.sentAt = [];
     this.ratePauseUntil = 0;
     this.backoffIndex = 0;
     if (this.retryTimer) { this.clearTimeout(this.retryTimer); this.retryTimer = null; }
-    if (this.desired) this.pump();
+    if (this.hasWork()) this.pump();
     else this.resolveClear();
   }
 
@@ -320,16 +348,16 @@ class DiscordPresence {
     if (conn !== this.conn) return;
     this.conn = null;
     this.ready = false;
-    this.displayed = false;
+    // displayed is left alone: the activity may still be on the profile, and a clear that was under way is retried.
     this.lastSentKey = null;
     this.lastSentStart = null;
     if (this.writing) { this.clearTimeout(this.writing.timer); this.writing = null; }
-    if (!this.closed && this.desired) this.scheduleReconnect();
-    this.resolveClear();
+    if (!this.closed && this.hasWork()) this.scheduleReconnect();
+    else this.resolveClear();
   }
 
   scheduleReconnect() {
-    if (this.closed || !this.desired || this.retryTimer) return;
+    if (this.closed || !this.hasWork() || this.retryTimer) return;
     const wait = this.backoff[Math.min(this.backoffIndex, this.backoff.length - 1)];
     this.backoffIndex++;
     const untilRate = Math.max(0, this.ratePauseUntil - this.now());
@@ -357,13 +385,14 @@ class DiscordPresence {
       this.lastSentKey = null;
       this.lastSentStart = null;
       this.forceClear = false;
+      this.clearWanted = false;
       this.resolveClear();
     }
     this.pump();
   }
 
   handleError(data) {
-    const message = String(data?.message || data?.error || "Discord error");
+    const message = describeError(data, "Discord error");
     this.logOnce(message);
     if (this.writing) { this.clearTimeout(this.writing.timer); this.writing = null; }
     if (this.isRateLimit(data)) {
@@ -374,6 +403,7 @@ class DiscordPresence {
     }
     // A bad client id or a refused command will not get better by itself: forget the wish, quietly.
     this.desired = null;
+    this.clearWanted = false;
     this.lastSentKey = null;
     this.lastSentStart = null;
     this.forceClear = false;
@@ -394,6 +424,14 @@ class DiscordPresence {
     try { this.log(message); } catch { /* a logger that throws is no reason to stop */ }
   }
 
+  // A burst run (a test application and writes past the window) also prints every reply Discord sends, codes included.
+  logResponse(op, value) {
+    if (!this.trace) return;
+    const kind = op === OP.FRAME ? (value?.evt || value?.cmd || "FRAME")
+      : op === OP.CLOSE ? "CLOSE" : op === OP.PING ? "PING" : op === OP.PONG ? "PONG" : `OP ${op}`;
+    try { this.log(`received ${kind}: ${JSON.stringify(value)}`); } catch { /* a logger that throws is no reason to stop */ }
+  }
+
   // The wait the next set must make: four writes in 20 s, a second between two, and Discord's own pause. A clear skips
   // the window and floor (pump checks the pause for it).
   sendWait() {
@@ -410,7 +448,7 @@ class DiscordPresence {
   pump() {
     if (this.closed || !this.ready || this.writing) return;
     if (!this.desired) {
-      if (!this.displayed && !this.forceClear) { this.resolveClear(); return; }
+      if (!this.clearWanted) { this.resolveClear(); return; }
       // A clear skips the window and the floor, but Discord's own rate-limit pause is not ours to ignore.
       const wait = Math.max(0, this.ratePauseUntil - this.now());
       if (wait > 0) { this.armPump(wait); return; }
@@ -465,6 +503,7 @@ class DiscordPresence {
   // Closing the app: stop waiting, close the pipe. A clear is sent by clear() before this.
   close() {
     this.closed = true;
+    this.clearWanted = false;
     this.cancelPump();
     if (this.retryTimer) { this.clearTimeout(this.retryTimer); this.retryTimer = null; }
     if (this.writing) { this.clearTimeout(this.writing.timer); this.writing = null; }

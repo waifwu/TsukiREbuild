@@ -16,6 +16,9 @@ const SPLIT = "03_00_ARC03_5B";                  // the day-3 scene after which 
 const SENSEI = "Ciel-sensei's Corner";
 // Ciel's day-3 scenes that sort (and so are indexed) after the split but are played before the route is chosen.
 const PRE_SPLIT_CIEL = new Set(["03_01_CIEL03_1", "03_01_CIEL03_2_1", "03_01_CIEL03_2_3"]);
+// Scripts that name no route of their own: the offer before a Ciel-sensei corner (QACALL) and the staff roll after an
+// ending. They keep the route last played.
+const CONTINUES = new Set(["QACALL", "STAFFROLL"]);
 
 export const PROLOGUE = "Prologue";
 export const COMMON = "Common Route";
@@ -31,9 +34,11 @@ export function readPlaytime(storage = globalThis.localStorage) {
 }
 
 // The route a script belongs to. `split` is the index of 03_00_ARC03_5B in the script list (the story's common route
-// runs through it); -1 when the list is not known yet, where the day stands in for it.
-export function routeOf(name, index = 0, split = -1) {
+// runs through it); -1 when the list is not known yet, where the day stands in for it. `previous` is the route last
+// shown, for QACALL and STAFFROLL, which name none of their own.
+export function routeOf(name, index = 0, split = -1, previous = null) {
   if (!name) return null;
+  if (CONTINUES.has(name)) return previous;
   if (/^QA/i.test(name)) return SENSEI;
   if (/^00_/.test(name)) return PROLOGUE;
   if (split >= 0) {
@@ -54,8 +59,8 @@ export function dayOf(name) {
 }
 
 // The activity the app sends. The timer's start is now minus the play time: Discord then shows the whole time, live.
-export function activityFor(name, index, split, playtimeMs, nowMs) {
-  const details = routeOf(name, index, split);
+export function activityFor(name, index, split, playtimeMs, nowMs, previous = null) {
+  const details = routeOf(name, index, split, previous);
   if (!details) return null;
   const day = dayOf(name);
   const assets = { large_image: "tsukihime", large_text: "Tsukihime" };
@@ -84,6 +89,7 @@ export function createPresence({
   let lastTick = null;
   let lastFlush = now();
   let lastSignature = null;
+  let lastRoute = null;   // for QACALL and STAFFROLL, which name no route themselves
 
   const flush = () => {
     const value = Math.max(0, Math.floor(playtimeMs));
@@ -110,7 +116,8 @@ export function createPresence({
     if (!enabled || hidden() || !vm?.running || vm.replay) { clear(); return; }
     const name = vm.script?.name;
     if (!name) { clear(); return; }
-    const activity = activityFor(name, vm.scriptIndex, splitIndex(), playtimeMs, now());
+    const activity = activityFor(name, vm.scriptIndex, splitIndex(), playtimeMs, now(), lastRoute);
+    if (activity) lastRoute = activity.details;
     const signature = activitySignature(activity);
     if (!force && signature === lastSignature) return;
     lastSignature = signature;
@@ -121,6 +128,7 @@ export function createPresence({
     const t = now();
     const visible = !hidden();
     const story = !!vm?.running && !vm.replay;
+    if (!story) lastRoute = null;   // a new story or a save starts it again
     // A stall (or the computer waking) is not play: count at most a second of one step.
     if (story && visible && lastTick !== null) playtimeMs += Math.min(Math.max(0, t - lastTick), 1000);
     lastTick = visible ? t : null;

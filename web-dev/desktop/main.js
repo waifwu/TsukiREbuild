@@ -117,11 +117,12 @@ let presence = null;                                     // Discord Rich Presenc
 const feedInfo = () => { const ws = feed?.info(), cb = clip?.info(); return ws || cb ? { port: ws?.port ?? null, clipboard: cb?.mode ?? null } : null; };
 
 // Discord Rich Presence (discord.js). --discord-client-id and --discord-burst are for trying a test pipe, unpackaged only:
-// the id replaces the app's public one, and burst allows that many writes past the usual window.
+// the id replaces the app's public one, burst allows that many writes past the usual window, and a burst run also prints
+// every reply Discord sends.
 function makePresence() {
   const devClient = !app.isPackaged ? flag("discord-client-id") : null;
   const burst = devClient ? Math.max(0, Number.parseInt(flag("discord-burst") || "0", 10) || 0) : 0;
-  return new DiscordPresence({ clientId: devClient || undefined, burst, log: (message) => console.error("Discord presence:", message) });
+  return new DiscordPresence({ clientId: devClient || undefined, burst, trace: burst > 0, log: (message) => console.error("Discord presence:", message) });
 }
 
 // What the page asks of the app (preload.js; the commands and their answers are listed in web/app/js/apphost.js).

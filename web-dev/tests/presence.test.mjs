@@ -152,7 +152,46 @@ test("desktop presence: a pipe that refuses before READY is left, and the next p
   assert.equal(sockets.length, 2, "the search goes on to the next pipe");
   await ready(sockets[1]);
   assert.equal(sockets[1].commands()[0].args.activity.details, "Common Route", "the second pipe gets the wish");
-  assert.deepEqual(log, ["Invalid Client ID"], "logged once");
+  assert.deepEqual(log, ["Discord refused the connection (4000): Invalid Client ID"], "logged once, with its code");
+  presence.close();
+});
+
+test("desktop presence: a handshake refused by a close frame is logged with its code", async () => {
+  const time = clock(), sockets = [], log = [];
+  const presence = new DiscordPresence({
+    now: time.now, setTimeout: time.setTimeout, clearTimeout: time.clearTimeout,
+    connect: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    paths: () => ["one", "two"], randomUUID: () => "nonce", log: (message) => log.push(message),
+    handshakeMs: 1000, writeMs: 5000,
+  });
+  presence.setActivity(wish());
+  const first = sockets[0];
+  first.connect();
+  first.send(OP.CLOSE, { code: 4000, message: "Invalid Client ID" });
+  await settle();
+  assert.deepEqual(log, ["Discord closed the pipe (4000): Invalid Client ID"], "a bad application id is not silent");
+  assert.notEqual(presence.desired, null, "the wish is kept");
+  assert.equal(sockets.length, 2, "the search goes on to the next pipe");
+  presence.close();
+});
+
+test("desktop presence: a burst run prints Discord's replies, with their codes", async () => {
+  const time = clock(), sockets = [], log = [];
+  const presence = new DiscordPresence({
+    now: time.now, setTimeout: time.setTimeout, clearTimeout: time.clearTimeout,
+    connect: () => { const socket = new FakeSocket(); sockets.push(socket); return socket; },
+    paths: () => ["test-pipe"], randomUUID: () => "nonce", log: (message) => log.push(message),
+    handshakeMs: 1000, writeMs: 5000, trace: true,
+  });
+  presence.setActivity(wish());
+  const socket = sockets[0];
+  await ready(socket);
+  assert.ok(log.some((line) => line.startsWith("received READY:")), "READY is printed");
+  const set = socket.commands()[0];
+  socket.send(OP.FRAME, { cmd: "SET_ACTIVITY", data: { code: 5010, message: "You are being rate limited" }, nonce: set.nonce });
+  await settle();
+  assert.ok(log.some((line) => line.startsWith("received SET_ACTIVITY:") && line.includes("5010")), "the reply's code is printed");
+  assert.ok(log.includes("Discord error (5010): You are being rate limited"), "the error line carries its code");
   presence.close();
 });
 
@@ -251,7 +290,36 @@ test("desktop presence: a rate-limited clear waits for the pause too, instead of
   await settle();
   assert.equal(socket.commands().length, 3, "the same clear is tried once after 20 s");
   assert.equal(socket.commands()[2].args.activity, null);
-  assert.deepEqual(log, ["You are being rate limited"], "logged once");
+  assert.deepEqual(log, ["Discord error (5010): You are being rate limited"], "logged once, with its code");
+  presence.close();
+});
+
+test("desktop presence: a clear under way when the pipe drops is written by the next pipe", async () => {
+  const time = clock(), sockets = [];
+  const presence = makePresence(time, sockets);
+  presence.setActivity(wish());
+  const first = sockets[0];
+  await ready(first);
+  await ack(first, first.commands()[0]);
+  presence.clear();   // the clear goes now; its answer is lost with the pipe
+  await settle();
+  assert.equal(first.commands().length, 2);
+  assert.equal(first.commands()[1].args.activity, null);
+  first.destroy();
+  await settle();
+  time.advance(5000);
+  await settle();
+  assert.equal(sockets.length, 2, "the clear is still owed: the next pipe is tried");
+  const second = sockets[1];
+  await ready(second);
+  assert.equal(second.commands().length, 1, "the clear goes on the new pipe");
+  assert.equal(second.commands()[0].args.activity, null);
+  await ack(second, second.commands()[0]);
+  second.destroy();
+  await settle();
+  time.advance(30000);
+  await settle();
+  assert.equal(sockets.length, 2, "once written, nothing is left to reconnect for");
   presence.close();
 });
 
@@ -314,7 +382,7 @@ test("desktop presence: Discord's rate limit (5010) keeps the wish and retries a
   time.advance(1);
   await settle();
   assert.equal(socket.commands().length, 2, "the same wish is tried again");
-  assert.deepEqual(log, ["You are being rate limited"], "logged once");
+  assert.deepEqual(log, ["Discord error (5010): You are being rate limited"], "logged once, with its code");
   presence.close();
 
   const otherTime = clock(), otherSockets = [], otherLog = [];
@@ -329,7 +397,7 @@ test("desktop presence: Discord's rate limit (5010) keeps the wish and retries a
   otherTime.advance(20000);
   await settle();
   assert.equal(pipe.commands().length, 1, "an invalid command is not sent again");
-  assert.deepEqual(otherLog, ["Invalid command"]);
+  assert.deepEqual(otherLog, ["Discord error (4002): Invalid command"]);
   other.close();
 });
 
@@ -341,27 +409,70 @@ test("presence route and day: prologue, common until the day-3 split, then the s
   assert.equal(routeOf("03_01_CIEL03_1", 73, split), COMMON);
   assert.equal(routeOf("03_01_CIEL03_2_1", 74, split), COMMON);
   assert.equal(routeOf("03_01_CIEL03_2_3", 75, split), COMMON);
-  assert.equal(routeOf("04_00_ARC04_1", 76, split), ARCUEID);
-  assert.equal(routeOf("05_01_CIEL05_2_2_2", 130, split), CIEL);
-  assert.equal(routeOf("QA00_01", 300, split), SENSEI);
+  assert.equal(routeOf("04_00_ARC04_1", 81, split), ARCUEID);
+  assert.equal(routeOf("05_01_CIEL05_2_2_2", 156, split), CIEL);
+  assert.equal(routeOf("QA_01", 495, split), SENSEI);
+  // The offer before a corner and the staff roll name no route: they keep the one last played.
+  assert.equal(routeOf("QACALL", 529, split), null, "not the corner until the offer is accepted");
+  assert.equal(routeOf("QACALL", 529, split, ARCUEID), ARCUEID);
+  assert.equal(routeOf("STAFFROLL", 530, split), null);
+  assert.equal(routeOf("STAFFROLL", 530, split, CIEL), CIEL);
   assert.equal(dayOf("04_00_ARC04_1"), 4);
-  assert.equal(dayOf("QA00_01"), null);
+  assert.equal(dayOf("QA_01"), null);
   const prologue = activityFor("00_01", 2, split, 0, 1_700_000_000_000);
   assert.equal(prologue.details, PROLOGUE);
   assert.equal(prologue.state, undefined, "no day in the prologue");
   assert.equal(prologue.assets.small_image, undefined);
-  const arc = activityFor("04_00_ARC04_1", 76, split, 3_600_000, 1_700_000_000_000);
+  const arc = activityFor("04_00_ARC04_1", 81, split, 3_600_000, 1_700_000_000_000);
   assert.equal(arc.state, "Day 4");
   assert.equal(arc.assets.small_image, "route_arc");
   assert.equal(arc.start, 1_699_996_400, "the start of the whole play time");
   assert.equal(activitySignature(arc), activitySignature({ ...arc, start: 1_600_000_000 }), "the timer is not part of the words");
+  const offer = activityFor("QACALL", 529, split, 3_600_000, 1_700_000_000_000, ARCUEID);
+  assert.equal(offer.details, ARCUEID, "the offer keeps the route just played");
+  assert.equal(offer.state, undefined);
+  const credits = activityFor("STAFFROLL", 530, split, 3_600_000, 1_700_000_000_000, CIEL);
+  assert.equal(credits.details, CIEL);
+  assert.equal(credits.assets.small_image, "route_ciel");
+});
+
+test("presence route: the offer and the staff roll keep the route last played", () => {
+  const storage = store();
+  let time = 1_000_000;
+  const sent = [];
+  const vm = { running: true, replay: false, script: { name: "04_00_ARC04_1" }, scriptIndex: 81, index: { names: Array(549).fill("x") } };
+  vm.index.names[70] = "03_00_ARC03_5B";
+  const presence = createPresence({
+    vm, now: () => time, storage, hidden: () => false, flushMs: 100000,
+    send: (activity, force) => { sent.push({ activity, force }); },
+  });
+  presence.setEnabled(true);
+  assert.equal(sent.at(-1).activity.details, ARCUEID);
+  vm.script = { name: "QACALL" }; vm.scriptIndex = 529;
+  time += 1000;
+  presence.tick();
+  assert.equal(sent.at(-1).activity.details, ARCUEID, "the offer keeps the route just played");
+  assert.notEqual(sent.at(-1).activity.details, SENSEI);
+  vm.script = { name: "QA_01" }; vm.scriptIndex = 495;
+  time += 1000;
+  presence.tick();
+  assert.equal(sent.at(-1).activity.details, SENSEI, "accepting the offer opens the corner");
+  vm.script = { name: "05_01_CIEL05_2_2_2" }; vm.scriptIndex = 156;
+  time += 1000;
+  presence.tick();
+  vm.script = { name: "STAFFROLL" }; vm.scriptIndex = 530;
+  time += 1000;
+  presence.tick();
+  assert.equal(sent.at(-1).activity.details, CIEL, "the staff roll keeps the ending's route");
+  assert.notEqual(sent.at(-1).activity.details, COMMON);
+  presence.setEnabled(false);
 });
 
 test("presence play time: story and visible only, menus included, saved every flush and on the way out", () => {
   const storage = store();
   let time = 1_000_000;
   const sent = [];
-  const vm = { running: true, replay: false, script: { name: "04_00_ARC04_1" }, scriptIndex: 76, index: { names: Array(140).fill("x") } };
+  const vm = { running: true, replay: false, script: { name: "04_00_ARC04_1" }, scriptIndex: 81, index: { names: Array(549).fill("x") } };
   vm.index.names[70] = "03_00_ARC03_5B";
   let hidden = false;
   const presence = createPresence({

@@ -162,6 +162,7 @@ test("what the page asks of an app goes through one object: the desktop's promis
   }
   // Discord Rich Presence is the desktop app's alone: the Android app has no such command.
   assert.match(desktop, /\n  presence: /);
+  assert.match(desktop, /trace: burst > 0/, "a burst run prints Discord's replies");
   assert.ok(read("web/app/js/apphost.js").includes("//   presence "));
   assert.doesNotMatch(java, /case "presence":/);
   assert.doesNotMatch(java, /put\("presence"/, "the Android app's info says nothing of presence");
