@@ -13,6 +13,7 @@ const path = require("node:path");
 const { Readable } = require("node:stream");
 const { Updater } = require("./updater.js");
 const { TextFeed, portOf, ClipboardFeed, clipboardModeOf } = require("./textfeed.js");
+const { DiscordPresence } = require("./discord.js");
 
 const HOST = "tsukihime.desktop";            // apphost.js knows this name: the page there is the app's
 const HOME = `app://${HOST}/`;
@@ -111,14 +112,31 @@ let win = null;
 let closing = false;   // the app or its window has begun to close
 let feed = null, feedStarted = Promise.resolve(false);   // the text feed, once the app is ready
 let clip = null;                                         // ... and the clipboard's, for LunaTranslator
+let presence = null;                                     // Discord Rich Presence, once the page asks for it
 // What the page is told of them: the feed's port and the clipboard's mode, or null when there is neither (the page then sends no lines).
 const feedInfo = () => { const ws = feed?.info(), cb = clip?.info(); return ws || cb ? { port: ws?.port ?? null, clipboard: cb?.mode ?? null } : null; };
 
+// Discord Rich Presence (discord.js). --discord-client-id and --discord-burst are for trying a test pipe, unpackaged only:
+// the id replaces the app's public one, burst allows that many writes past the usual window, and a burst run also prints
+// every reply Discord sends.
+function makePresence() {
+  const devClient = !app.isPackaged ? flag("discord-client-id") : null;
+  const burst = devClient ? Math.max(0, Number.parseInt(flag("discord-burst") || "0", 10) || 0) : 0;
+  return new DiscordPresence({ clientId: devClient || undefined, burst, trace: burst > 0, log: (message) => console.error("Discord presence:", message) });
+}
+
 // What the page asks of the app (preload.js; the commands and their answers are listed in web/app/js/apphost.js).
 const host = {
-  info: async () => { await feedStarted; return { kind: "desktop", shell: SHELL, version: app.getVersion(), update: updater.info(), text: feedInfo() }; },
+  info: async () => { await feedStarted; return { kind: "desktop", shell: SHELL, version: app.getVersion(), update: updater.info(), presence: true, text: feedInfo() }; },
   // a line the story shows, for the text feed and the clipboard
   text: ({ line }) => { const s = typeof line === "string" ? line : ""; feed?.send(s); clip?.send(s); return {}; },
+  // The route, day and play time the page would like on Discord (presence.js): the Discord app on this computer only.
+  presence: ({ activity, force } = {}) => {
+    presence ||= makePresence();
+    if (activity == null) { presence.clear({ force: !!force }); return {}; }
+    presence.setActivity(activity);
+    return {};
+  },
   // a web page, in the computer's own browser
   open: ({ url }) => { outside(String(url)); return {}; },
   // An exported save: the system's own question of where to put it, then written there.
@@ -172,8 +190,12 @@ function createWindow() {
     if (leaving) return;
     e.preventDefault();
     leaving = true;
+    // Discord's activity goes at once (not after the saves): the page may be taking its time to answer.
+    const cleared = presence ? presence.clear({ force: true }) : Promise.resolve();
     const saved = win.webContents.executeJavaScript("globalThis.appSuspend && globalThis.appSuspend(), 1").catch(() => {});
-    Promise.race([saved, new Promise((ok) => setTimeout(ok, 2000))]).then(() => { if (win && !win.isDestroyed()) win.close(); });
+    Promise.race([saved, new Promise((ok) => setTimeout(ok, 2000))])
+      .then(() => Promise.race([cleared, new Promise((ok) => setTimeout(ok, 300))]))
+      .then(() => { if (win && !win.isDestroyed()) win.close(); });
   });
 
   // Alt+F4 closes the window (through the saves above) whatever the page does with the key: the game takes every key
@@ -229,8 +251,8 @@ else {
     createWindow();
     app.on("activate", () => { if (!win) createWindow(); });
   });
-  app.on("before-quit", () => { closing = true; });
-  app.on("will-quit", () => { feed?.close(); clip?.close(); });
+  app.on("before-quit", () => { closing = true; presence?.clear({ force: true }); });
+  app.on("will-quit", () => { feed?.close(); clip?.close(); presence?.close(); presence = null; });
   // The saves are in the page's localStorage, under the app's own data folder: written to disk before the app ends.
   app.on("window-all-closed", () => { session.defaultSession.flushStorageData(); app.quit(); });
 }

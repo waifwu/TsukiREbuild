@@ -2934,13 +2934,39 @@ export class UI {
     return listTop + halfCount * L.row;
   }
 
+  // The Desktop section (desktop app only, when its info says Rich Presence is there): one switch for Discord.
+  buildDesktopSection(page, topY, startRow) {
+    const L = KEYPAGE;
+    const div = (cls, text, css) => { const d = document.createElement("div"); d.className = cls; if (text !== undefined) d.textContent = text; if (css) d.style.cssText = css; return d; };
+    page.under.append(div("keyhead", say("Desktop"), `left:${L.x}px;top:${topY}px;width:${L.w}px;height:${L.head}px;line-height:${L.head}px;`));
+    const y = topY + L.head;
+    page.under.append(div("keyrow", say("Discord Rich Presence"), `left:${L.x}px;top:${y}px;width:${L.w}px;height:${L.row}px;line-height:${L.row}px;`));
+    const b = document.createElement("button");
+    b.className = "keyslot";
+    b.style.cssText = `left:${L.slotX[0]}px;top:${y + (L.row - L.slot[1]) / 2}px;width:${L.slot[0]}px;height:${L.slot[1]}px;`;
+    b.placeY = y;
+    const paint = () => {
+      const on = !!this.env.settings.discordPresence;
+      b.textContent = say(on ? "On" : "Off");
+      b.classList.toggle("none", !on);
+      b.setAttribute("aria-pressed", String(on));
+      b.setAttribute("aria-label", `${say("Discord Rich Presence")}: ${say(on ? "On" : "Off")}`);
+    };
+    b.setSelected = (on) => b.classList.toggle("sel", on);
+    paint();
+    this.confWidget(page.widgets, b, startRow, 0, () => { this.env.setSetting("discordPresence", !this.env.settings.discordPresence); paint(); }, { sound: 1 });
+    return y + L.row;
+  }
+
   buildControlsPage(pageBox) {
     const C = this.conf, M = this.confMem, K = this.keys;
     const L = KEYPAGE, rowsY = L.top + L.head;
     const menuTop = rowsY + ACTIONS.length * L.row + L.gap, fixedRows = Math.max(MENU_KEYS.length, MOUSE.length);
     const padTop = menuTop + L.head + fixedRows * L.row + L.gap;
     const padRows = Math.ceil(padControlsList(new PadConfig().labels()).length / 2);
-    const height = padTop + L.head + (2 + padRows) * L.row + L.foot - CONFIG.clip[1];
+    const padBottom = padTop + L.head + (2 + padRows) * L.row;
+    const desktop = !!this.env.presenceAvailable?.();
+    const height = padBottom + (desktop ? L.gap + L.head + L.row : 0) + L.foot - CONFIG.clip[1];
     const page = this.configScroll(pageBox, Math.max(0, height - CONFIG.clip[3]), M?.scroll[2] ?? 0);
     C.scroll = page.scroll;
     const div = (cls, text, css) => { const d = document.createElement("div"); d.className = cls; if (text !== undefined) d.textContent = text; if (css) d.style.cssText = css; return d; };
@@ -3009,16 +3035,19 @@ export class UI {
       cap(say(what), x2 + 360, y);
     });
     this.buildControllerSection(page, padTop, ACTIONS.length);
+    if (desktop) this.buildDesktopSection(page, padBottom + L.gap, ACTIONS.length + 2);
     page.order();
   }
 
   // The Controls page on a touch device: what a finger does (touch.js TOUCH_CONTROLS), in the rows of the keyboard's page,
-  // followed by the Controller section for Bluetooth/USB gamepads.
+  // followed by the Controller section for Bluetooth/USB gamepads and, in the desktop app, the Desktop section.
   buildTouchPage(pageBox) {
     const C = this.conf, M = this.confMem, L = KEYPAGE, rowsY = L.top + L.head;
     const padTop = rowsY + TOUCH_CONTROLS.length * L.row + L.gap;
     const padRows = Math.ceil(padControlsList(new PadConfig().labels()).length / 2);
-    const height = padTop + L.head + (2 + padRows) * L.row + L.foot - CONFIG.clip[1];
+    const padBottom = padTop + L.head + (2 + padRows) * L.row;
+    const desktop = !!this.env.presenceAvailable?.();
+    const height = padBottom + (desktop ? L.gap + L.head + L.row : 0) + L.foot - CONFIG.clip[1];
     const page = this.configScroll(pageBox, Math.max(0, height - TOUCH.config.height), M?.scroll[2] ?? 0);
     C.scroll = page.scroll;
     const div = (cls, text, css) => { const d = document.createElement("div"); d.className = cls; d.textContent = text; d.style.cssText = css; return d; };
@@ -3029,6 +3058,7 @@ export class UI {
       page.over.append(div("keycap", say(how), `left:${L.x + 520}px;top:${y + (L.row - L.slot[1]) / 2}px;height:${L.slot[1]}px;line-height:${L.slot[1]}px;`));
     });
     this.buildControllerSection(page, padTop, 0);
+    if (desktop) this.buildDesktopSection(page, padBottom + L.gap, 2);
     page.order();
   }
 

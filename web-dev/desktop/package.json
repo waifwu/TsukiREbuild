@@ -23,7 +23,7 @@
     "productName": "Tsukihime",
     "artifactName": "Tsukihime-${os}-${arch}.${ext}",
     "directories": { "output": "out", "buildResources": "build" },
-    "files": ["main.js", "preload.js", "updater.js", "textfeed.js", "package.json"],
+    "files": ["main.js", "preload.js", "updater.js", "textfeed.js", "discord.js", "package.json"],
     "extraResources": [
       { "from": "../../web/app", "to": "www", "filter": ["**/*", "!**/.*"] },
       { "from": "../../web/assets", "to": "www/assets", "filter": ["**/*", "!voice/**", "!se/**", "!ja/**", "!zh/**", "!pt/**", "!ru/**", "!**/.*"] },

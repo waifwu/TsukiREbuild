@@ -348,7 +348,8 @@ test("web, touch, Chinese & Russian Controls labels, and Android wrapper wire co
   assert.match(touchCss, /html\.touch\[data-input="pad"\] \.helpbar/);
   assert.match(touchCss, /html\.touch #stage :focus \{ outline: none; \}/);
 
-  for (const w of ["Controller", "Confirm / Cancel", "Button prompts", "Auto", "South (A / \u2715)", "East (A / \u25cb)"]) {
+  for (const w of ["Controller", "Confirm / Cancel", "Button prompts", "Auto", "South (A / \u2715)", "East (A / \u25cb)",
+    "Desktop", "Discord Rich Presence", "On", "Off"]) {
     assert.ok(CONTROLS_ZH[w] && /[\u4e00-\u9fff]/.test(CONTROLS_ZH[w]), `Chinese label for ${w}`);
     assert.ok(SITE_RU[w] && /[\u0400-\u04ff]/.test(SITE_RU[w]), `Russian label for ${w}`);
   }
